@@ -4,6 +4,8 @@ import matplotlib.pyplot as plt
 import matplotlib.tri
 import os
 
+from pypolydim import polydim
+
 def make_np_sparse(A_sparse_data, new_size = None, shifts = None, transpose = None):
     if new_size is None:
         new_size = [A_sparse_data.size[0], A_sparse_data.size[1]]
@@ -85,14 +87,12 @@ def plot_solution_on_coordinates(coordinates, solution_on_coordinates, title = N
         file_path = os.path.join(export_folder, file_name)
         plt.savefig(file_path)
         plt.show()
-        plt.close(fig)
     else:
-        plt.pause(0.1)
-        plt.close(fig)
+        plt.show()
 
 def export_folder(file_path):
     # Export Folder 
-    export_file_path = "./Export/Test_1"
+    export_file_path = file_path
     if not os.path.exists(export_file_path):
         os.makedirs(export_file_path)
 
@@ -107,3 +107,71 @@ def export_folder(file_path):
         os.makedirs(export_solution_path)
 
     return export_file_path,export_mesh_path,export_solution_path
+
+def plot_FOM_solution(mesh,
+                      speed_dofs_data,
+                      u_x_numeric,
+                      u_x_strong,
+                      u_y_numeric,
+                      u_y_strong,
+                      pressure_dofs_data,
+                      p_numeric,
+                      p_strong,
+                      vtk_utilities,
+                      export_solution_path
+                      ):
+    
+
+    u_x_on_cell0Ds = polydim.pde_tools.assembler_utilities.pcc_2_d.extract_solution_on_cell0_ds(
+    mesh,
+    speed_dofs_data,
+    u_x_numeric,
+    u_x_strong
+    )
+
+    u_y_on_cell0Ds = polydim.pde_tools.assembler_utilities.pcc_2_d.extract_solution_on_cell0_ds(
+        mesh,
+        speed_dofs_data,
+        u_y_numeric,
+        u_y_strong
+    )
+
+    p_on_cell0Ds = polydim.pde_tools.assembler_utilities.pcc_2_d.extract_solution_on_cell0_ds(
+        mesh,
+        pressure_dofs_data,
+        p_numeric,
+        p_strong
+    )
+
+    zero_cell0 = np.zeros_like(u_x_on_cell0Ds.numeric_solution)
+
+    vtk_utilities.export_solution_2(export_solution_path + '/u_x',
+                                mesh, 
+                                u_x_on_cell0Ds.numeric_solution,
+                                zero_cell0,
+                                zero_cell0,
+                                zero_cell0
+                                )
+    
+    vtk_utilities.export_solution_2(export_solution_path + '/u_y',
+                                    mesh, 
+                                    u_y_on_cell0Ds.numeric_solution,
+                                    zero_cell0,
+                                    zero_cell0,
+                                    zero_cell0
+                                    )
+    
+    vtk_utilities.export_solution_2(export_solution_path + '/p',
+                                    mesh, 
+                                    p_on_cell0Ds.numeric_solution,
+                                    zero_cell0,
+                                    zero_cell0,
+                                    zero_cell0
+                                    )
+    
+    plot_solution(mesh, u_x_on_cell0Ds.numeric_solution, "u_x",export_folder='./Plots') 
+    plot_solution(mesh, u_y_on_cell0Ds.numeric_solution, "u_y",export_folder='./Plots')
+    plot_solution(mesh, np.sqrt(u_x_on_cell0Ds.numeric_solution * u_x_on_cell0Ds.numeric_solution +\
+                        u_y_on_cell0Ds.numeric_solution * u_y_on_cell0Ds.numeric_solution), 
+                        "u_mag",export_folder='./Plots')
+    plot_solution(mesh, p_on_cell0Ds.numeric_solution, "p",export_folder='./Plots') 

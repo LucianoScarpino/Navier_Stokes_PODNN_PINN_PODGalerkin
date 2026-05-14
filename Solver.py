@@ -3,12 +3,15 @@ import scipy
 from pypolydim import polydim
 
 from Assembler import Assembler
-from other_utilities import make_np_sparse
+from other_utilities import make_np_sparse,plot_FOM_solution
 
 class Solver(object):
-    def __init__(self,discretizer:object):
+    def __init__(self,discretizer:object,export_path:str):
         self.method_type,self.mesh,\
-            self.mesh_connectivity_data,self.mesh_geometric_data,self.geometry_utilities = discretizer.discretize()
+            self.mesh_connectivity_data,self.mesh_geometric_data,\
+                self.geometry_utilities,self.vtk_utilities = discretizer.discretize()
+        
+        self.export_path = export_path
         
     def solve_FOM(
         self,
@@ -17,8 +20,9 @@ class Solver(object):
         mu0: float,
         mu1: float,
         newton_tol: float = 1.0e-6,
-        max_iterations: int = 10
-    ):
+        max_iterations: int = 10,
+        plot_solution: str = False
+        ):
         
         pressure_reference_element_data,speed_reference_element_data,\
                     pressure_mesh_dofs_info,pressure_dofs_data,\
@@ -36,12 +40,17 @@ class Solver(object):
         
         assembler = Assembler(configuration=configuration)
 
-        J_S, f_S, u_x_strong, u_y_strong, p_strong = assembler.assemble_linear_system(speed_n_dofs=speed_n_dofs,
-                                                                                    pressure_n_dofs=pressure_n_dofs,
-                                                                                    tot_dofs=tot_dofs,
-                                                                                    mu0=mu0,
-                                                                                    mu1=mu1
-                                                                                    )
+        operators = assembler.assemble_linear_system(speed_n_dofs=speed_n_dofs,
+                                                    pressure_n_dofs=pressure_n_dofs,
+                                                    tot_dofs=tot_dofs,
+                                                    mu0=mu0,
+                                                    mu1=mu1
+                                                    )
+        J_S = operators["J_S"]
+        f_S = operators["f_S"]
+        u_x_strong = operators["u_x_strong"]
+        u_y_strong = operators["u_y_strong"]
+        p_strong = operators["p_strong"]
 
         u_x_numeric = polydim.pde_tools.assembler_utilities.pcc_2_d.evaluate_function_on_dofs(self.geometry_utilities,
                                                                                         self.mesh,
@@ -215,15 +224,46 @@ class Solver(object):
         )
         print("-" * 100)
 
-        return {
-            "u": u_k,
-            "u_x": u_x_numeric,
-            "u_y": u_y_numeric,
-            "p": p_numeric,
-            "iterations": num_iteration - 1,
-            "relative_increment": relative_increment,
-            "converged": residual_norm <= newton_tol * solution_norm
-        }
+        if plot_solution:
+            plot_FOM_solution(self.mesh,speed_dofs_data,
+                            u_x_numeric,
+                            u_x_strong,
+                            u_y_numeric,
+                            u_y_strong,
+                            pressure_dofs_data,
+                            p_numeric,
+                            p_strong,
+                            self.vtk_utilities,
+                            self.export_path
+                            )
+        
+        ops = {
+                "J_S": operators["J_S"],
+                'J_A_x': operators["J_A_x"],
+                'J_A_y': operators["J_A_y"],
+                'J_B_x': operators["J_B_x"],
+                'J_B_y': operators["J_B_y"],
+                'J_BT_x': operators["J_BT_x"],
+                'J_BT_y': operators["J_BT_y"],
+                'A_operator': operators["A_operator"],
+                'B_x_operator': operators["B_x_operator"],
+                'B_y_operator': operators["B_y_operator"]
+                }
+
+        sol = {
+                "u": u_k,
+                "u_x": u_x_numeric,
+                "u_y": u_y_numeric,
+                "p": p_numeric,
+                "iterations": num_iteration - 1,
+                "relative_increment": relative_increment,
+                "converged": residual_norm <= newton_tol * solution_norm,
+                "speed_n_dofs": speed_n_dofs,
+                "pressure_n_dofs": pressure_n_dofs,
+                "tot_dofs": tot_dofs
+                }
+
+        return sol,ops   
 
 
     def speed_x_initial_condition(self,x, y, z):  

@@ -17,7 +17,7 @@ class Assembler(object):
         A_operator = self.assemble_A_operator()
         B_x_operator, B_y_operator = self.assemble_B_operator()
         f_x_function,f_y_function = self.build_f_components()
-        F = self.assemble_f(f_x_function,f_y_function,pressure_n_dofs)
+        f_S = self.assemble_f(f_x_function, f_y_function, pressure_n_dofs)
         u_x_strong,u_y_strong = self.assemble_u_strong()
         p_strong = self.assemble_p_strong()
 
@@ -59,9 +59,28 @@ class Assembler(object):
             True
         )
 
-        J_S = J_A_x + J_A_y - J_B_x - J_B_y - J_BT_x - J_BT_y
+        J_A = J_A_x + J_A_y
+        J_B = J_B_x + J_B_y + J_BT_x + J_BT_y
+        J_S = self.mu0 * J_A - J_B
 
-        return J_S,F,u_x_strong,u_y_strong,p_strong
+        return {
+            "J_S": J_S,
+            "f_S": f_S,
+            "u_x_strong": u_x_strong,
+            "u_y_strong": u_y_strong,
+            "p_strong": p_strong,
+            "J_A": J_A,
+            "J_B": J_B,
+            "J_A_x": J_A_x,
+            "J_A_y": J_A_y,
+            "J_B_x": J_B_x,
+            "J_B_y": J_B_y,
+            "J_BT_x": J_BT_x,
+            "J_BT_y": J_BT_y,
+            "A_operator": A_operator,
+            "B_x_operator": B_x_operator,
+            "B_y_operator": B_y_operator
+        }
 
     def build_f_components(self):
         def f_x_function(x:float,y:float,z:float):
@@ -143,8 +162,8 @@ class Assembler(object):
         
         return p_strong
     
-    def nu_term(self,x, y, z):  
-        return self.mu0
+    def nu_term(self, x, y, z):
+        return 1.0
     
     def b_x_term(self,x, y, z):  
         return np.array([\

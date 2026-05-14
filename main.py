@@ -7,7 +7,7 @@ from other_utilities import export_folder
 from Discretization import Discretize
 from Solver import Solver
 
-file_path, mesh_path, solution_path = export_folder("./Export/Test_1")
+file_path, mesh_path, solution_path = export_folder("./Export")
 
 mesh_size = 0.001
 domain_area = 1.0
@@ -16,7 +16,7 @@ vertices = np.array([[0.0, 1.0, 1.0, 0.0],
                      [0.0, 0.0, 0.0, 0.0]])
 
 discretizer = Discretize(vertices,mesh_size,domain_area,mesh_path)
-solver = Solver(discretizer)
+solver = Solver(discretizer,solution_path)
 
 info_internal,info_dirichlet,info_neumann_none = solver.set_dofs()
 
@@ -50,9 +50,20 @@ mu1 = 2.0
 tol = 1.0e-6
 max_it = 10
 
-u,u_x,u_y,p,iterations,rel_increment,converged = solver.solve_FOM(p_boundary_info,
-                                                                  u_boundary_info,
-                                                                  mu0=mu0,
-                                                                  mu1=mu1,
-                                                                  newton_tol=tol,
-                                                                  max_iterations=max_it)
+FOM_solution, FOM_Operators = solver.solve_FOM(p_boundary_info,
+                                                u_boundary_info,
+                                                mu0=mu0,
+                                                mu1=mu1,
+                                                newton_tol=tol,
+                                                max_iterations=max_it,
+                                                plot_solution=True)
+
+# Set POD parameters
+np.random.seed(26)
+
+snapshot_num = 100
+mu0_range = [1., 10.]
+mu1_range = [1., 3.]
+
+P = np.array([mu0_range, mu1_range])
+training_set = np.random.uniform(low=P[:, 0], high=P[:, 1], size=(snapshot_num, P.shape[0]))
