@@ -18,8 +18,8 @@ vertices = np.array([[0.0, 1.0, 1.0, 0.0],
 discretizer = Discretize(vertices,mesh_size,domain_area,mesh_path)
 solver = Solver(discretizer)
 
-# Set Problem boundary conditions
 info_internal,info_dirichlet,info_neumann_none = solver.set_dofs()
+
 p_boundary_info = {
     0: info_internal,
     1: info_dirichlet,
@@ -43,3 +43,16 @@ u_boundary_info = {
     7: info_dirichlet,
     8: info_dirichlet
 }
+
+# Set FOM parameters
+mu0 = 1.0
+mu1 = 2.0
+tol = 1.0e-6
+max_it = 10
+
+u,u_x,u_y,p,iterations,rel_increment,converged = solver.solve_FOM(p_boundary_info,
+                                                                  u_boundary_info,
+                                                                  mu0=mu0,
+                                                                  mu1=mu1,
+                                                                  newton_tol=tol,
+                                                                  max_iterations=max_it)

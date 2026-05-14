@@ -1,17 +1,30 @@
+import numpy as np
+import scipy
 from pypolydim import polydim
 
 from Assembler import Assembler
+from other_utilities import make_np_sparse
 
 class Solver(object):
     def __init__(self,discretizer:object):
         self.method_type,self.mesh,\
             self.mesh_connectivity_data,self.mesh_geometric_data,self.geometry_utilities = discretizer.discretize()
         
-    def solve(self,p_boundary_info:dict,u_boundary_info:dict,mu0:float,mu1:float,method:str='PODGalerkin'):
+    def solve_FOM(
+        self,
+        p_boundary_info: dict,
+        u_boundary_info: dict,
+        mu0: float,
+        mu1: float,
+        newton_tol: float = 1.0e-6,
+        max_iterations: int = 10
+    ):
+        
         pressure_reference_element_data,speed_reference_element_data,\
                     pressure_mesh_dofs_info,pressure_dofs_data,\
                             speed_mesh_dofs_info,speed_dofs_data,\
-                                 speed_n_dofs,pressure_n_dofs,tot_dofs = self.Taylor_Hood_FEM(self.method_type,
+                                 speed_n_dofs,pressure_n_dofs,tot_dofs,\
+                                     speed_n_strongs,pressure_n_strongs = self.Taylor_Hood_FEM(self.method_type,
                                                                                         self.mesh,
                                                                                         self.mesh_connectivity_data,
                                                                                         p_boundary_info,
@@ -23,14 +36,202 @@ class Solver(object):
         
         assembler = Assembler(configuration=configuration)
 
-        J_S, F, u_x_strong, u_y_strong, p_strong = assembler.assemble_linear_system(speed_n_dofs=speed_n_dofs,
+        J_S, f_S, u_x_strong, u_y_strong, p_strong = assembler.assemble_linear_system(speed_n_dofs=speed_n_dofs,
                                                                                     pressure_n_dofs=pressure_n_dofs,
                                                                                     tot_dofs=tot_dofs,
                                                                                     mu0=mu0,
                                                                                     mu1=mu1
                                                                                     )
+
+        u_x_numeric = polydim.pde_tools.assembler_utilities.pcc_2_d.evaluate_function_on_dofs(self.geometry_utilities,
+                                                                                        self.mesh,
+                                                                                        self.mesh_geometric_data,
+                                                                                        speed_dofs_data,
+                                                                                        speed_reference_element_data,
+                                                                                        self.speed_x_initial_condition).function_dofs
         
+        u_y_numeric = polydim.pde_tools.assembler_utilities.pcc_2_d.evaluate_function_on_dofs(self.geometry_utilities,
+                                                                                        self.mesh,
+                                                                                        self.mesh_geometric_data,
+                                                                                        speed_dofs_data,
+                                                                                        speed_reference_element_data,
+                                                                                        self.speed_y_initial_condition).function_dofs
         
+        p_numeric = polydim.pde_tools.assembler_utilities.pcc_2_d.evaluate_function_on_dofs(self.geometry_utilities,
+                                                                                        self.mesh,
+                                                                                        self.mesh_geometric_data,
+                                                                                        pressure_dofs_data,
+                                                                                        pressure_reference_element_data,
+                                                                                        self.pressure_initial_condition).function_dofs
+        
+        # Newton Method
+        u_k = np.concatenate([u_x_numeric, u_y_numeric, p_numeric])
+        du_x_strong = np.zeros(speed_n_strongs)
+        du_y_strong = np.zeros(speed_n_strongs)
+        dp_strong = np.zeros(pressure_n_strongs)
+        residual_norm = 1.0
+        solution_norm = 1.0
+        num_iteration = 1
+
+        print()
+        print("-" * 100)
+        while num_iteration < max_iterations and residual_norm > newton_tol * solution_norm:
+            c_operator = polydim.pde_tools.assembler_utilities.pcc_2_d.assemble_ns_operators(
+                self.geometry_utilities,
+                self.mesh,
+                self.mesh_geometric_data,
+                speed_dofs_data,
+                speed_reference_element_data,
+                u_x_numeric,
+                u_y_numeric,
+                u_x_strong,
+                u_y_strong
+            )
+
+            # Convetion Jacobian 
+            J_C = make_np_sparse(
+                c_operator.convective_operator.operator_dofs,
+                [tot_dofs, tot_dofs],
+                [0, 0]
+            )
+
+            # Convective contribute on forcing term
+            f_C = np.concatenate([
+                c_operator.convective_rhs,
+                np.zeros(pressure_n_dofs)
+            ])
+            
+            # Linearized Residual R(Uk) = F - C(Uk) - JsUk
+            J_rhs = f_S - f_C - J_S @ u_k
+
+            # Solve and Update
+            du = scipy.sparse.linalg.spsolve(J_S + J_C, J_rhs)
+            u_k = u_k + du
+
+            # Take contribution decomposing solution
+            du_x = du[0:speed_n_dofs]
+            du_y = du[speed_n_dofs:2 * speed_n_dofs]
+            dp = du[2 * speed_n_dofs:]
+
+            u_x_numeric = u_k[0:speed_n_dofs]
+            u_y_numeric = u_k[speed_n_dofs:2 * speed_n_dofs]
+            p_numeric = u_k[2 * speed_n_dofs:]
+
+            # Compute norm of increments
+            du_x_norm_L2 = polydim.pde_tools.assembler_utilities.pcc_2_d.compute_error_l2(
+                self.geometry_utilities,
+                self.mesh,
+                self.mesh_geometric_data,
+                speed_dofs_data,
+                speed_reference_element_data,
+                du_x,
+                du_x_strong
+            )
+
+            du_y_norm_L2 = polydim.pde_tools.assembler_utilities.pcc_2_d.compute_error_l2(
+                self.geometry_utilities,
+                self.mesh,
+                self.mesh_geometric_data,
+                speed_dofs_data,
+                speed_reference_element_data,
+                du_y,
+                du_y_strong
+            )
+
+            dp_norm_L2 = polydim.pde_tools.assembler_utilities.pcc_2_d.compute_error_l2(
+                self.geometry_utilities,
+                self.mesh,
+                self.mesh_geometric_data,
+                pressure_dofs_data,
+                pressure_reference_element_data,
+                dp,
+                dp_strong
+            )
+
+            # Compute norm of solution, i.e. norms of corrected (with increment) solution
+            u_x_norm_L2 = polydim.pde_tools.assembler_utilities.pcc_2_d.compute_error_l2(
+                self.geometry_utilities,
+                self.mesh,
+                self.mesh_geometric_data,
+                speed_dofs_data,
+                speed_reference_element_data,
+                u_x_numeric,
+                u_x_strong
+            )
+
+            u_y_norm_L2 = polydim.pde_tools.assembler_utilities.pcc_2_d.compute_error_l2(
+                self.geometry_utilities,
+                self.mesh,
+                self.mesh_geometric_data,
+                speed_dofs_data,
+                speed_reference_element_data,
+                u_y_numeric,
+                u_y_strong
+            )
+
+            p_norm_L2 = polydim.pde_tools.assembler_utilities.pcc_2_d.compute_error_l2(
+                self.geometry_utilities,
+                self.mesh,
+                self.mesh_geometric_data,
+                pressure_dofs_data,
+                pressure_reference_element_data,
+                p_numeric,
+                p_strong
+            )
+
+            # Ratio res/sol tells how small is increment w.r.t solution 
+            residual_norm = np.sqrt(
+                du_x_norm_L2.numeric_norm_l2**2
+                + du_y_norm_L2.numeric_norm_l2**2
+                + dp_norm_L2.numeric_norm_l2**2
+            )
+
+            solution_norm = np.sqrt(
+                u_x_norm_L2.numeric_norm_l2**2
+                + u_y_norm_L2.numeric_norm_l2**2
+                + p_norm_L2.numeric_norm_l2**2
+            )
+
+            relative_increment = residual_norm / solution_norm
+
+            print(
+                f"[Newton] iter {num_iteration:02d}/{max_iterations} | "
+                f"dofs={tot_dofs} | "
+                f"||du||/||u||={relative_increment:.3e} | "
+                f"tol={newton_tol:.1e}"
+            )
+
+            num_iteration += 1
+
+        relative_increment = residual_norm / solution_norm
+
+        print()
+        print(
+            f"FOM solve completed | "
+            f"mu0={mu0:.6g}, mu1={mu1:.6g} | "
+            f"iterations={num_iteration - 1} | "
+            f"relative_increment={relative_increment:.3e} | "
+            f"converged={residual_norm <= newton_tol * solution_norm}"
+        )
+        print("-" * 100)
+
+        return {
+            "u": u_k,
+            "u_x": u_x_numeric,
+            "u_y": u_y_numeric,
+            "p": p_numeric,
+            "iterations": num_iteration - 1,
+            "relative_increment": relative_increment,
+            "converged": residual_norm <= newton_tol * solution_norm
+        }
+
+
+    def speed_x_initial_condition(self,x, y, z):  
+        return 0.0
+    def speed_y_initial_condition(self,x, y, z):  
+        return 0.0
+    def pressure_initial_condition(self,x, y, z):  
+        return 0.0
 
     def set_dofs(self):
         info_internal = polydim.pde_tools.do_fs.DOFsManager.MeshDOFsInfo.BoundaryInfo(polydim.pde_tools.do_fs.DOFsManager.MeshDOFsInfo.BoundaryInfo.BoundaryTypes.none)
@@ -44,7 +245,15 @@ class Solver(object):
 
         return info_internal,info_dirichlet,info_neumann_none
     
-    def Taylor_Hood_FEM(self,method_type,mesh,mesh_connectivity_data,p_boundary_info,u_boundary_info):
+    def Taylor_Hood_FEM(
+            self,
+            method_type,
+            mesh,
+            mesh_connectivity_data,
+            p_boundary_info,
+            u_boundary_info
+            ):
+        
         pressure_reference_element_data = polydim.pde_tools.local_space_pcc_2_d.create_reference_element(method_type, 1)
         speed_reference_element_data = polydim.pde_tools.local_space_pcc_2_d.create_reference_element(method_type,2) 
         dof_manager = polydim.pde_tools.do_fs.DOFsManager()
@@ -75,4 +284,6 @@ class Solver(object):
         return pressure_reference_element_data,speed_reference_element_data,\
                 pressure_mesh_dofs_info,pressure_dofs_data,\
                 speed_mesh_dofs_info,speed_dofs_data,\
-                speed_n_dofs,pressure_n_dofs,tot_dofs
+                speed_n_dofs,pressure_n_dofs,tot_dofs,\
+                speed_n_strongs,pressure_n_strongs
+                
