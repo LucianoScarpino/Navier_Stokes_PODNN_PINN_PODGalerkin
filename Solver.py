@@ -1,19 +1,36 @@
 from pypolydim import polydim
 
+from Assembler import Assembler
+
 class Solver(object):
     def __init__(self,discretizer:object):
         self.method_type,self.mesh,\
-            self.mesh_connectivity_data,self.mesh_geometric_data = discretizer.discretize()
+            self.mesh_connectivity_data,self.mesh_geometric_data,self.geometry_utilities = discretizer.discretize()
         
-    def solve(self,p_boundary_info:dict,u_boundary_info:dict):
+    def solve(self,p_boundary_info:dict,u_boundary_info:dict,mu0:float,mu1:float,method:str='PODGalerkin'):
         pressure_reference_element_data,speed_reference_element_data,\
                     pressure_mesh_dofs_info,pressure_dofs_data,\
-                            speed_mesh_dofs_info,speed_dofs_data = self.Taylor_Hood_FEM(self.method_type,
+                            speed_mesh_dofs_info,speed_dofs_data,\
+                                 speed_n_dofs,pressure_n_dofs,tot_dofs = self.Taylor_Hood_FEM(self.method_type,
                                                                                         self.mesh,
                                                                                         self.mesh_connectivity_data,
                                                                                         p_boundary_info,
                                                                                         u_boundary_info)
-        pass
+        configuration = self.geometry_utilities,self.mesh,\
+                            self.mesh_geometric_data,speed_dofs_data,\
+                                speed_reference_element_data,speed_mesh_dofs_info,\
+                                    pressure_dofs_data,pressure_mesh_dofs_info,pressure_reference_element_data
+        
+        assembler = Assembler(configuration=configuration)
+
+        J_S, F, u_x_strong, u_y_strong, p_strong = assembler.assemble_linear_system(speed_n_dofs=speed_n_dofs,
+                                                                                    pressure_n_dofs=pressure_n_dofs,
+                                                                                    tot_dofs=tot_dofs,
+                                                                                    mu0=mu0,
+                                                                                    mu1=mu1
+                                                                                    )
+        
+        
 
     def set_dofs(self):
         info_internal = polydim.pde_tools.do_fs.DOFsManager.MeshDOFsInfo.BoundaryInfo(polydim.pde_tools.do_fs.DOFsManager.MeshDOFsInfo.BoundaryInfo.BoundaryTypes.none)
@@ -57,4 +74,5 @@ class Solver(object):
         
         return pressure_reference_element_data,speed_reference_element_data,\
                 pressure_mesh_dofs_info,pressure_dofs_data,\
-                speed_mesh_dofs_info,speed_dofs_data
+                speed_mesh_dofs_info,speed_dofs_data,\
+                speed_n_dofs,pressure_n_dofs,tot_dofs

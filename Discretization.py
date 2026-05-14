@@ -25,7 +25,7 @@ class Discretize(object):
         mesh_connectivity_data = polydim.pde_tools.mesh.MeshMatricesDAO_mesh_connectivity_data(mesh)
         self.export_mesh_(self.mesh_path,mesh,vtk_utilities)
 
-        return method_type,mesh,mesh_connectivity_data,mesh_geometric_data
+        return method_type,mesh,mesh_connectivity_data,mesh_geometric_data,geometry_utilities
 
     def generate_utilies_(self):
         """
