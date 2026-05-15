@@ -6,12 +6,14 @@ from pypolydim.export_vtk_utilities import ExportVTKUtilities
 from other_utilities import export_folder
 from Discretization import Discretize
 from Solver import Solver
-from ROM import ROM_Methods, ROMPerformanceEvaluator
+from ROM import ROM_Methods, ROM_NN_Methods, ROMPerformanceEvaluator
 
 file_path, mesh_path, solution_path = export_folder("./Export")
 reduced_model_path = file_path + "/Models/reduced_model.pkl"
+podnn_model_path = file_path + "/Models/podnn_model.pkl"
 
-method = 'PODGalerkin'
+# Available: 'PODGalerkin', 'PODNN', 'all'
+method = 'all' 
 visualize = True
 
 mesh_size = 0.001
@@ -84,8 +86,9 @@ training_set = np.random.uniform(low=P[:, 0], high=P[:, 1], size=(snapshot_num, 
 rom = ROM_Methods(FOM_solution,FOM_Operators,FOM_data,training_set=training_set)
 reduced_elements = rom.reduce(solver,p_boundary_info,u_boundary_info,tol=tol,N_max=N_max)
 
-# Evaluate the model performance
-metrics_evaluator = ROMPerformanceEvaluator(
+if method == 'PODGalerkin' or method == 'all':
+    # Evaluate the model performance
+    metrics_evaluator = ROMPerformanceEvaluator(
         solver=solver,
         rom=rom,
         reduced_data=reduced_elements,
@@ -94,23 +97,23 @@ metrics_evaluator = ROMPerformanceEvaluator(
         fom_reference_solution=FOM_solution,
         parameter_ranges=P,
         newton_tol=tol,
-        max_iterations=max_it
+        max_iterations=max_it,
+        method_name="POD-Galerkin",
+        results_prefix="fom_vs_pod_galerkin"
     )
 
-metrics_results = metrics_evaluator.evaluate(n_test=10, seed=123, results_folder="./Results/POD_Galerkin")
+    metrics_results = metrics_evaluator.evaluate(n_test=10, seed=123, results_folder="./Results/POD_Galerkin")
 
-# Save Reduced Model to run it online in -> "POD_online.py"
-rom.save_reduced_model(reduced_elements,reduced_model_path,metadata={
-                                                                    "snapshot_num": snapshot_num,
-                                                                    "mu0_range": mu0_range,
-                                                                    "mu1_range": mu1_range,
-                                                                    "tol": tol,
-                                                                    "N_max": N_max
-                                                                    }   
-                                                                    )
-
-if method == 'PODGalerkin':
-    # Online
+    # Save Reduced Model to run it online in -> "PODGalerkin_online.py"
+    rom.save_reduced_model(reduced_elements,reduced_model_path,metadata={
+                                                                        "snapshot_num": snapshot_num,
+                                                                        "mu0_range": mu0_range,
+                                                                        "mu1_range": mu1_range,
+                                                                        "tol": tol,
+                                                                        "N_max": N_max
+                                                                        }   
+                                                                        )
+    # Online -> test to see plot
     tol = 1.0e-6
     max_it = 10
     mu0 = 1.0
@@ -150,3 +153,101 @@ if method == 'PODGalerkin':
     print(f"p_rom shape={p_rom.shape}")
     print()
     print('='*100)
+
+if method == 'PODNN' or method == 'all':
+    # Offline PODNN training
+    podnn = ROM_NN_Methods(
+        fom_data = FOM_data,
+        reduced_data=reduced_elements,
+        training_set=training_set
+    )
+
+    podnn_data = podnn.train(
+        hidden_layers=(128, 128, 64),
+        epochs=5000,
+        learning_rate=1.0e-3,
+        weight_decay=1.0e-8,
+        batch_size=None,
+        seed=26,
+        print_every=500
+    )
+
+    # Evaluate PODNN performance
+    podnn_metrics_evaluator = ROMPerformanceEvaluator(
+        solver=solver,
+        rom=podnn,
+        reduced_data=reduced_elements,
+        p_boundary_info=p_boundary_info,
+        u_boundary_info=u_boundary_info,
+        fom_reference_solution=FOM_solution,
+        parameter_ranges=P,
+        newton_tol=tol,
+        max_iterations=max_it,
+        reduced_solver=lambda mu0_test, mu1_test: podnn.solve_PODNN(
+            mu0=mu0_test,
+            mu1=mu1_test,
+            podnn_data=podnn_data,
+            plot_solution=False
+        ),
+        method_name="PODNN",
+        results_prefix="fom_vs_podnn"
+    )
+
+    podnn_metrics_results = podnn_metrics_evaluator.evaluate(
+        n_test=10,
+        seed=123,
+        results_folder="./Results/PODNN"
+    )
+
+    # Save Reduced Model to run it online in -> "PODNN_online.py"
+    podnn.save_podnn_model(
+        podnn_data=podnn_data,
+        export_path=podnn_model_path,
+        metadata={
+            "snapshot_num": snapshot_num,
+            "mu0_range": mu0_range,
+            "mu1_range": mu1_range,
+            "tol": tol,
+            "N_max": N_max,
+            "hidden_layers": (128, 128, 64),
+            "epochs": 5000,
+            "learning_rate": 1.0e-3,
+            "weight_decay": 1.0e-8
+        }
+    )
+
+    # Online PODNN evaluation
+    mu0 = 1.0
+    mu1 = 2.0
+
+    print("\n[Online] Solving PODNN ROM")
+    print(f"[Online] mu0={mu0}, mu1={mu1}")
+
+    podnn_sol = podnn.solve_PODNN(
+        mu0=mu0,
+        mu1=mu1,
+        podnn_data=podnn_data,
+        plot_solution = visualize
+    )
+
+    print("\n[Online] Completed")
+    print(f"[Online] converged={podnn_sol['converged']}")
+    print(f"[Online] coefficients shape={podnn_sol['coefficients'].shape}")
+    print(f"[Online] reconstructed solution shape={podnn_sol['u'].shape}")
+
+    speed_n_dofs = reduced_elements["speed_n_dofs"]
+
+    u_podnn = podnn_sol["u"]
+    u_x_podnn = u_podnn[0:speed_n_dofs]
+    u_y_podnn = u_podnn[speed_n_dofs:2 * speed_n_dofs]
+    p_podnn = u_podnn[2 * speed_n_dofs:]
+
+    print("\n[Online] Solution components")
+    print(f"u_x_podnn shape={u_x_podnn.shape}")
+    print(f"u_y_podnn shape={u_y_podnn.shape}")
+    print(f"p_podnn shape={p_podnn.shape}")
+    print()
+    print('='*100)
+
+if method not in ['PODGalerkin', 'PODNN', 'all']:
+    raise ValueError(f"Unknown method: {method}")

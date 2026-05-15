@@ -4,6 +4,8 @@ import pickle
 import os
 import time
 import csv
+import torch
+import torch.nn as nn
 
 from pypolydim import polydim
 from other_utilities import make_np_sparse,plot_FOM_solution
@@ -539,6 +541,273 @@ class ROM_Methods(object):
         basis_function_matrix = np.transpose(np.array(basis_functions))
         
         return basis_function_matrix
+    
+
+
+class ROM_NN_Methods(object):
+    def __init__(self, reduced_data, training_set, fom_data):
+        self.reduced_data = reduced_data
+        self.training_set = np.asarray(training_set)
+        self.fom_data = fom_data
+
+    def solve_PODNN(self, mu0, mu1, podnn_data, plot_solution=False):
+        V = self.reduced_data["V"]
+        coefficients = self.predict_coefficients(mu0, mu1, podnn_data)
+        U_N = V @ coefficients
+
+        if plot_solution:
+            self.plot_PODNN_solution(self.reduced_data, U_N, self.fom_data["vtk_utilities"])
+
+        return {
+            "u": U_N,
+            "coefficients": coefficients,
+            "converged": np.nan,
+            "iterations": np.nan,
+            "relative_increment": np.nan
+        }
+
+    def build_global_snapshot_matrix(self):
+        snapshot_matrix_u = self.reduced_data["snapshot_matrix_u"]
+        snapshot_matrix_p = self.reduced_data["snapshot_matrix_p"]
+
+        snapshot_matrix = np.concatenate(
+            [snapshot_matrix_u, snapshot_matrix_p],
+            axis=1
+        )
+
+        return snapshot_matrix
+
+    def compute_pod_coefficients(self):
+        V = self.reduced_data["V"]
+        snapshot_matrix = self.build_global_snapshot_matrix()
+
+        coefficients_matrix = np.linalg.lstsq(V,snapshot_matrix.T,rcond=None)[0].T
+
+        return coefficients_matrix
+
+    def build_mlp(self, input_dim, output_dim, hidden_layers):
+        layers = []
+        previous_dim = input_dim
+
+        for hidden_dim in hidden_layers:
+            layers.append(nn.Linear(previous_dim, hidden_dim))
+            layers.append(nn.Tanh())
+            previous_dim = hidden_dim
+
+        layers.append(nn.Linear(previous_dim, output_dim))
+
+        return nn.Sequential(*layers)
+
+    def train(
+        self,
+        hidden_layers=(128, 128, 64),
+        epochs=5000,
+        learning_rate=1.0e-3,
+        weight_decay=1.0e-8,
+        batch_size=None,
+        seed=26,
+        print_every=500
+    ):
+        """
+        Train a nonlinear MLP for the map
+            mu = (mu0, mu1) -> POD coefficients.
+
+        The network is trained with Adam on normalized inputs and normalized POD
+        coefficients. This is a stronger PODNN than the previous fixed-random
+        shallow model.
+        """
+        if self.training_set is None:
+            raise ValueError("training_set is required to train PODNN.")
+
+        torch.manual_seed(seed)
+        np.random.seed(seed)
+
+        X_raw = self.training_set.astype(np.float64)
+        Y_raw = self.compute_pod_coefficients().astype(np.float64)
+
+        x_mean = np.mean(X_raw, axis=0)
+        x_std = np.std(X_raw, axis=0)
+        x_std[x_std == 0.0] = 1.0
+
+        y_mean = np.mean(Y_raw, axis=0)
+        y_std = np.std(Y_raw, axis=0)
+        y_std[y_std == 0.0] = 1.0
+
+        X = (X_raw - x_mean) / x_std
+        Y = (Y_raw - y_mean) / y_std
+
+        X_tensor = torch.tensor(X, dtype=torch.float32)
+        Y_tensor = torch.tensor(Y, dtype=torch.float32)
+
+        input_dim = X_tensor.shape[1]
+        output_dim = Y_tensor.shape[1]
+
+        model = self.build_mlp(input_dim, output_dim, hidden_layers)
+        optimizer = torch.optim.Adam(
+            model.parameters(),
+            lr=learning_rate,
+            weight_decay=weight_decay
+        )
+        loss_function = nn.MSELoss()
+
+        n_samples = X_tensor.shape[0]
+        if batch_size is None or batch_size > n_samples:
+            batch_size = n_samples
+
+        model.train()
+        for epoch in range(1, epochs + 1):
+            permutation = torch.randperm(n_samples)
+            epoch_loss = 0.0
+
+            for start in range(0, n_samples, batch_size):
+                indices = permutation[start:start + batch_size]
+                X_batch = X_tensor[indices]
+                Y_batch = Y_tensor[indices]
+
+                optimizer.zero_grad()
+                Y_prediction = model(X_batch)
+                loss = loss_function(Y_prediction, Y_batch)
+                loss.backward()
+                optimizer.step()
+
+                epoch_loss += loss.item() * X_batch.shape[0]
+
+            epoch_loss /= n_samples
+
+            if print_every is not None and (epoch == 1 or epoch % print_every == 0 or epoch == epochs):
+                print(f"[PODNN] epoch {epoch:05d}/{epochs} | mse={epoch_loss:.3e}")
+
+        model.eval()
+        with torch.no_grad():
+            Y_prediction = model(X_tensor).cpu().numpy()
+
+        Y_prediction_physical = Y_prediction * y_std + y_mean
+        train_error = np.linalg.norm(Y_raw - Y_prediction_physical) / max(np.linalg.norm(Y_raw), 1.0e-14)
+
+        podnn_data = {
+            "model_state_dict": model.state_dict(),
+            "hidden_layers": tuple(hidden_layers),
+            "input_dim": input_dim,
+            "output_dim": output_dim,
+            "x_mean": x_mean,
+            "x_std": x_std,
+            "y_mean": y_mean,
+            "y_std": y_std,
+            "epochs": epochs,
+            "learning_rate": learning_rate,
+            "weight_decay": weight_decay,
+            "batch_size": batch_size,
+            "train_error_coefficients": train_error
+        }
+
+        print(
+            f"[PODNN] trained | samples={n_samples} | "
+            f"hidden_layers={hidden_layers} | "
+            f"rel_train_error_coefficients={train_error:.3e}"
+        )
+
+        return podnn_data
+
+    def predict_coefficients(self, mu0, mu1, podnn_data):
+        model = self.build_mlp(
+            podnn_data["input_dim"],
+            podnn_data["output_dim"],
+            podnn_data["hidden_layers"]
+        )
+        model.load_state_dict(podnn_data["model_state_dict"])
+        model.eval()
+
+        mu = np.array([[mu0, mu1]], dtype=np.float64)
+        X = (mu - podnn_data["x_mean"]) / podnn_data["x_std"]
+        X_tensor = torch.tensor(X, dtype=torch.float32)
+
+        with torch.no_grad():
+            coefficients_normalized = model(X_tensor).cpu().numpy().ravel()
+
+        coefficients = coefficients_normalized * podnn_data["y_std"] + podnn_data["y_mean"]
+
+        return coefficients
+
+    def plot_PODNN_solution(
+        self,
+        reduced_data,
+        U_N,
+        vtk_utilities,
+        export_solution_path="./Export/Solution/PODNN",
+        plot_path="./Plots/PODNN"
+        ):
+        """
+        Plot/export a reconstructed PODNN solution.
+
+        This method intentionally remains separate from solve_PODNN.
+        Pure online execution loaded from a podnn_model.pkl does not contain
+        FEM mesh/dof objects, because they are not pickle-serializable.
+        Therefore plotting is available only when fom_data is present, e.g.
+        during the offline/main workflow.
+        """
+        if self.fom_data is None:
+            raise ValueError(
+                "plot_PODNN_solution requires fom_data. It cannot be used with a pure PODNN model loaded from pickle."
+            )
+
+        if not os.path.exists(export_solution_path):
+            os.makedirs(export_solution_path)
+
+        if not os.path.exists(plot_path):
+            os.makedirs(plot_path)
+
+        speed_n_dofs = reduced_data["speed_n_dofs"]
+        u_x_podnn = U_N[0:speed_n_dofs]
+        u_y_podnn = U_N[speed_n_dofs:2 * speed_n_dofs]
+        p_podnn = U_N[2 * speed_n_dofs:]
+
+        plot_FOM_solution(
+            mesh=self.fom_data["mesh"],
+            speed_dofs_data=self.fom_data["speed_dofs_data"],
+            u_x_numeric=u_x_podnn,
+            u_x_strong=self.fom_data["u_x_strong"],
+            u_y_numeric=u_y_podnn,
+            u_y_strong=self.fom_data["u_y_strong"],
+            pressure_dofs_data=self.fom_data["pressure_dofs_data"],
+            p_numeric=p_podnn,
+            p_strong=self.fom_data["p_strong"],
+            vtk_utilities=vtk_utilities,
+            export_solution_path=export_solution_path,
+            plot_path=plot_path
+        )
+
+    def save_podnn_model(self, podnn_data, export_path, metadata=None):
+        podnn_model = {
+            "podnn_data": podnn_data,
+            "reduced_data": self.reduced_data,
+            "metadata": metadata if metadata is not None else {}
+        }
+
+        with open(export_path, "wb") as file:
+            pickle.dump(podnn_model, file, protocol=pickle.HIGHEST_PROTOCOL)
+
+        print(f"[PODNN] model saved to: {export_path}")
+
+    @staticmethod
+    def load_podnn_model(export_path):
+        if not os.path.exists(export_path):
+            raise FileNotFoundError(
+                f"PODNN model file not found: {export_path}. Run the offline script first."
+            )
+
+        if os.path.getsize(export_path) == 0:
+            raise ValueError(
+                f"PODNN model file is empty: {export_path}. Delete it and regenerate it."
+            )
+
+        with open(export_path, "rb") as file:
+            podnn_model = pickle.load(file)
+
+        print()
+        print("="*100)
+        print(f"[PODNN] model loaded from: {export_path}")
+
+        return podnn_model
 
 
 
@@ -553,7 +822,10 @@ class ROMPerformanceEvaluator(object):
         fom_reference_solution,
         parameter_ranges,
         newton_tol=1.0e-6,
-        max_iterations=10
+        max_iterations=10,
+        reduced_solver=None,
+        method_name="POD-Galerkin",
+        results_prefix="fom_vs_pod_galerkin"
     ):
         self.solver = solver
         self.rom = rom
@@ -564,6 +836,21 @@ class ROMPerformanceEvaluator(object):
         self.parameter_ranges = np.asarray(parameter_ranges)
         self.newton_tol = newton_tol
         self.max_iterations = max_iterations
+        self.reduced_solver = reduced_solver
+        self.method_name = method_name
+        self.results_prefix = results_prefix
+
+    def solve_reduced_model(self, mu0, mu1):
+        if self.reduced_solver is not None:
+            return self.reduced_solver(mu0, mu1)
+
+        return self.rom.solve_POD_Galerkin(
+            self.reduced_data,
+            mu0=mu0,
+            mu1=mu1,
+            newton_tol=self.newton_tol,
+            max_iterations=self.max_iterations
+        )
 
     def relative_error(self, reference, approximation):
         denominator = max(np.linalg.norm(reference), 1.0e-14)
@@ -606,7 +893,7 @@ class ROMPerformanceEvaluator(object):
 
     def evaluate(self, n_test=10, seed=123, results_folder="./Results/POD_Galerkin"):
         print("\n" + "=" * 100)
-        print("[Metrics] FOM vs POD-Galerkin on testing set")
+        print(f"[Metrics] FOM vs {self.method_name} on testing set")
         print("=" * 100)
 
         if not os.path.exists(results_folder):
@@ -658,13 +945,7 @@ class ROMPerformanceEvaluator(object):
             fom_time = time.perf_counter() - tic
 
             tic = time.perf_counter()
-            rom_solution = self.rom.solve_POD_Galerkin(
-                self.reduced_data,
-                mu0=mu0_test,
-                mu1=mu1_test,
-                newton_tol=self.newton_tol,
-                max_iterations=self.max_iterations
-            )
+            rom_solution = self.solve_reduced_model(mu0_test, mu1_test)
             rom_time = time.perf_counter() - tic
 
             errors = self.compute_errors(fom_solution, rom_solution)
@@ -730,7 +1011,7 @@ class ROMPerformanceEvaluator(object):
         results["rom_dofs"] = rom_dofs
         results["compression_ratio"] = compression_ratio
 
-        per_sample_csv = os.path.join(results_folder, "fom_vs_pod_galerkin_metrics.csv")
+        per_sample_csv = os.path.join(results_folder, self.results_prefix + "_metrics.csv")
         with open(per_sample_csv, "w", newline="") as file:
             writer = csv.DictWriter(file, fieldnames=list(per_sample_rows[0].keys()))
             writer.writeheader()
@@ -784,7 +1065,7 @@ class ROMPerformanceEvaluator(object):
             "std": 0.0
         })
 
-        summary_csv = os.path.join(results_folder, "fom_vs_pod_galerkin_summary.csv")
+        summary_csv = os.path.join(results_folder, self.results_prefix + "_summary.csv")
         with open(summary_csv, "w", newline="") as file:
             writer = csv.DictWriter(file, fieldnames=["metric", "mean", "max", "min", "std"])
             writer.writeheader()
