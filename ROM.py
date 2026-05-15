@@ -167,7 +167,8 @@ class ROM_Methods(object):
             p_strong=self.fom_data["p_strong"],
             vtk_utilities=vtk_utilities,
             export_solution_path=export_solution_path,
-            plot_path= plot_path
+            plot_path= plot_path,
+            method='_PODGalerkin'
         )
     
     def reduce(self,
@@ -773,7 +774,8 @@ class ROM_NN_Methods(object):
             p_strong=self.fom_data["p_strong"],
             vtk_utilities=vtk_utilities,
             export_solution_path=export_solution_path,
-            plot_path=plot_path
+            plot_path=plot_path,
+            method='_PODNN'
         )
 
     def save_podnn_model(self, podnn_data, export_path, metadata=None):

@@ -119,7 +119,8 @@ def plot_FOM_solution(mesh,
                       p_strong,
                       vtk_utilities,
                       export_solution_path,
-                      plot_path
+                      plot_path,
+                      method
                       ):
     
 
@@ -146,7 +147,7 @@ def plot_FOM_solution(mesh,
 
     zero_cell0 = np.zeros_like(u_x_on_cell0Ds.numeric_solution)
 
-    vtk_utilities.export_solution_2(export_solution_path + '/u_x',
+    vtk_utilities.export_solution_2(export_solution_path + '/u_x' + method,
                                 mesh, 
                                 u_x_on_cell0Ds.numeric_solution,
                                 zero_cell0,
@@ -154,7 +155,7 @@ def plot_FOM_solution(mesh,
                                 zero_cell0
                                 )
     
-    vtk_utilities.export_solution_2(export_solution_path + '/u_y',
+    vtk_utilities.export_solution_2(export_solution_path + '/u_y' + method,
                                     mesh, 
                                     u_y_on_cell0Ds.numeric_solution,
                                     zero_cell0,
@@ -162,7 +163,7 @@ def plot_FOM_solution(mesh,
                                     zero_cell0
                                     )
     
-    vtk_utilities.export_solution_2(export_solution_path + '/p',
+    vtk_utilities.export_solution_2(export_solution_path + '/p' + method,
                                     mesh, 
                                     p_on_cell0Ds.numeric_solution,
                                     zero_cell0,
@@ -170,9 +171,9 @@ def plot_FOM_solution(mesh,
                                     zero_cell0
                                     )
     
-    plot_solution(mesh, u_x_on_cell0Ds.numeric_solution, "u_x",export_folder=plot_path) 
-    plot_solution(mesh, u_y_on_cell0Ds.numeric_solution, "u_y",export_folder=plot_path)
+    plot_solution(mesh, u_x_on_cell0Ds.numeric_solution, "u_x" + method,export_folder=plot_path) 
+    plot_solution(mesh, u_y_on_cell0Ds.numeric_solution, "u_y" + method,export_folder=plot_path)
     plot_solution(mesh, np.sqrt(u_x_on_cell0Ds.numeric_solution * u_x_on_cell0Ds.numeric_solution +\
                         u_y_on_cell0Ds.numeric_solution * u_y_on_cell0Ds.numeric_solution), 
-                        "u_mag",export_folder=plot_path)
-    plot_solution(mesh, p_on_cell0Ds.numeric_solution, "p",export_folder=plot_path) 
+                        "u_mag" + method,export_folder=plot_path)
+    plot_solution(mesh, p_on_cell0Ds.numeric_solution, "p" + method,export_folder=plot_path) 

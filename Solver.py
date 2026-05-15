@@ -236,7 +236,8 @@ class Solver(object):
                             p_strong,
                             self.vtk_utilities,
                             self.export_path,
-                            plot_path
+                            plot_path,
+                            method = '_FOM'
                             )
         
         ops = {
