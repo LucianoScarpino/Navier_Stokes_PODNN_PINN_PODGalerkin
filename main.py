@@ -6,10 +6,13 @@ from pypolydim.export_vtk_utilities import ExportVTKUtilities
 from other_utilities import export_folder
 from Discretization import Discretize
 from Solver import Solver
-from ROM import ROM_Methods
+from ROM import ROM_Methods, ROMPerformanceEvaluator
 
 file_path, mesh_path, solution_path = export_folder("./Export")
 reduced_model_path = file_path + "/Models/reduced_model.pkl"
+
+method = 'PODGalerkin'
+visualize = True
 
 mesh_size = 0.001
 domain_area = 1.0
@@ -58,9 +61,9 @@ FOM_solution, FOM_Operators, FOM_data = solver.solve_FOM(p_boundary_info,
                                                 mu1=mu1,
                                                 newton_tol=tol,
                                                 max_iterations=max_it,
-                                                plot_solution=True)
+                                                plot_solution=visualize)
 
-method = 'PODGalerkin'
+#---------------------------------------------------------------------------------#
 
 # Set POD parameters
 np.random.seed(26)
@@ -81,23 +84,37 @@ training_set = np.random.uniform(low=P[:, 0], high=P[:, 1], size=(snapshot_num, 
 rom = ROM_Methods(FOM_solution,FOM_Operators,FOM_data,training_set=training_set)
 reduced_elements = rom.reduce(solver,p_boundary_info,u_boundary_info,tol=tol,N_max=N_max)
 
+# Evaluate the model performance
+metrics_evaluator = ROMPerformanceEvaluator(
+        solver=solver,
+        rom=rom,
+        reduced_data=reduced_elements,
+        p_boundary_info=p_boundary_info,
+        u_boundary_info=u_boundary_info,
+        fom_reference_solution=FOM_solution,
+        parameter_ranges=P,
+        newton_tol=tol,
+        max_iterations=max_it
+    )
+
+metrics_results = metrics_evaluator.evaluate(n_test=10, seed=123, results_folder="./Results/POD_Galerkin")
+
 # Save Reduced Model to run it online in -> "POD_online.py"
-rom.save_reduced_model(
-    reduced_elements,
-    reduced_model_path,
-    metadata={
-        "snapshot_num": snapshot_num,
-        "mu0_range": mu0_range,
-        "mu1_range": mu1_range,
-        "tol": tol,
-        "N_max": N_max
-    }
-)
+rom.save_reduced_model(reduced_elements,reduced_model_path,metadata={
+                                                                    "snapshot_num": snapshot_num,
+                                                                    "mu0_range": mu0_range,
+                                                                    "mu1_range": mu1_range,
+                                                                    "tol": tol,
+                                                                    "N_max": N_max
+                                                                    }   
+                                                                    )
 
 if method == 'PODGalerkin':
     # Online
     tol = 1.0e-6
     max_it = 10
+    mu0 = 1.0
+    mu1 = 2.0
 
     print("\n[Online] Solving POD-Galerkin ROM")
     print(f"[Online] mu0={mu0}, mu1={mu1}")
@@ -108,7 +125,7 @@ if method == 'PODGalerkin':
         mu1=mu1,
         newton_tol=tol,
         max_iterations=max_it,
-        plot_solution=True
+        plot_solution=visualize
     )
 
     print("\n[Online] Completed")

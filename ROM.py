@@ -2,6 +2,8 @@ import numpy as np
 import scipy
 import pickle
 import os
+import time
+import csv
 
 from pypolydim import polydim
 from other_utilities import make_np_sparse,plot_FOM_solution
@@ -537,3 +539,261 @@ class ROM_Methods(object):
         basis_function_matrix = np.transpose(np.array(basis_functions))
         
         return basis_function_matrix
+
+
+
+class ROMPerformanceEvaluator(object):
+    def __init__(
+        self,
+        solver,
+        rom,
+        reduced_data,
+        p_boundary_info,
+        u_boundary_info,
+        fom_reference_solution,
+        parameter_ranges,
+        newton_tol=1.0e-6,
+        max_iterations=10
+    ):
+        self.solver = solver
+        self.rom = rom
+        self.reduced_data = reduced_data
+        self.p_boundary_info = p_boundary_info
+        self.u_boundary_info = u_boundary_info
+        self.fom_reference_solution = fom_reference_solution
+        self.parameter_ranges = np.asarray(parameter_ranges)
+        self.newton_tol = newton_tol
+        self.max_iterations = max_iterations
+
+    def relative_error(self, reference, approximation):
+        denominator = max(np.linalg.norm(reference), 1.0e-14)
+        return np.linalg.norm(reference - approximation) / denominator
+
+    def split_global_solution(self, global_solution, speed_n_dofs):
+        u_x = global_solution[0:speed_n_dofs]
+        u_y = global_solution[speed_n_dofs:2 * speed_n_dofs]
+        p = global_solution[2 * speed_n_dofs:]
+        return u_x, u_y, p
+
+    def compute_errors(self, fom_solution, rom_solution):
+        speed_n_dofs = self.reduced_data["speed_n_dofs"]
+
+        U_fom = fom_solution["u"]
+        U_rom = rom_solution["u"]
+
+        u_x_fom, u_y_fom, p_fom = self.split_global_solution(U_fom, speed_n_dofs)
+        u_x_rom, u_y_rom, p_rom = self.split_global_solution(U_rom, speed_n_dofs)
+
+        u_mag_fom = np.sqrt(u_x_fom**2 + u_y_fom**2)
+        u_mag_rom = np.sqrt(u_x_rom**2 + u_y_rom**2)
+
+        return {
+            "err_U": self.relative_error(U_fom, U_rom),
+            "err_u_x": self.relative_error(u_x_fom, u_x_rom),
+            "err_u_y": self.relative_error(u_y_fom, u_y_rom),
+            "err_p": self.relative_error(p_fom, p_rom),
+            "err_u_mag": self.relative_error(u_mag_fom, u_mag_rom)
+        }
+
+    def print_metric_summary(self, metric_name, values):
+        values = np.asarray(values)
+        print(
+            f"{metric_name:<18} | "
+            f"mean={np.mean(values):.3e} | "
+            f"max={np.max(values):.3e} | "
+            f"std={np.std(values):.3e}"
+        )
+
+    def evaluate(self, n_test=10, seed=123, results_folder="./Results/POD_Galerkin"):
+        print("\n" + "=" * 100)
+        print("[Metrics] FOM vs POD-Galerkin on testing set")
+        print("=" * 100)
+
+        if not os.path.exists(results_folder):
+            os.makedirs(results_folder)
+
+        rng = np.random.default_rng(seed)
+        testing_set = rng.uniform(
+            low=self.parameter_ranges[:, 0],
+            high=self.parameter_ranges[:, 1],
+            size=(n_test, self.parameter_ranges.shape[0])
+        )
+
+        results = {
+            "testing_set": testing_set,
+            "fom_times": [],
+            "rom_times": [],
+            "speedups": [],
+            "fom_iterations": [],
+            "rom_iterations": [],
+            "err_U": [],
+            "err_u_x": [],
+            "err_u_y": [],
+            "err_p": [],
+            "err_u_mag": []
+        }
+
+        per_sample_rows = []
+
+        fom_dofs = self.fom_reference_solution["tot_dofs"]
+        rom_dofs = self.reduced_data["V"].shape[1]
+        compression_ratio = fom_dofs / rom_dofs
+
+        for test_id, (mu0_test, mu1_test) in enumerate(testing_set):
+            print(
+                f"\n[Metrics] test {test_id + 1:03d}/{n_test} | "
+                f"mu0={mu0_test:.6g}, mu1={mu1_test:.6g}"
+            )
+
+            tic = time.perf_counter()
+            fom_solution, _, _ = self.solver.solve_FOM(
+                self.p_boundary_info,
+                self.u_boundary_info,
+                mu0=mu0_test,
+                mu1=mu1_test,
+                newton_tol=self.newton_tol,
+                max_iterations=self.max_iterations,
+                plot_solution=False
+            )
+            fom_time = time.perf_counter() - tic
+
+            tic = time.perf_counter()
+            rom_solution = self.rom.solve_POD_Galerkin(
+                self.reduced_data,
+                mu0=mu0_test,
+                mu1=mu1_test,
+                newton_tol=self.newton_tol,
+                max_iterations=self.max_iterations
+            )
+            rom_time = time.perf_counter() - tic
+
+            errors = self.compute_errors(fom_solution, rom_solution)
+            speedup = fom_time / max(rom_time, 1.0e-14)
+
+            results["fom_times"].append(fom_time)
+            results["rom_times"].append(rom_time)
+            results["speedups"].append(speedup)
+            results["fom_iterations"].append(fom_solution["iterations"])
+            results["rom_iterations"].append(rom_solution["iterations"])
+            results["err_U"].append(errors["err_U"])
+            results["err_u_x"].append(errors["err_u_x"])
+            results["err_u_y"].append(errors["err_u_y"])
+            results["err_p"].append(errors["err_p"])
+            results["err_u_mag"].append(errors["err_u_mag"])
+
+            per_sample_rows.append({
+                                    "test_id": test_id + 1,
+                                    "mu0": mu0_test,
+                                    "mu1": mu1_test,
+                                    "err_U": errors["err_U"],
+                                    "err_u_x": errors["err_u_x"],
+                                    "err_u_y": errors["err_u_y"],
+                                    "err_u_mag": errors["err_u_mag"],
+                                    "err_p": errors["err_p"],
+                                    "fom_time_s": fom_time,
+                                    "rom_time_s": rom_time,
+                                    "speedup": speedup,
+                                    "fom_iterations": fom_solution["iterations"],
+                                    "rom_iterations": rom_solution["iterations"],
+                                    "fom_converged": fom_solution["converged"],
+                                    "rom_converged": rom_solution["converged"]
+                                    })
+
+            print(
+                f"[Metrics] err_U={errors['err_U']:.3e} | "
+                f"err_u_mag={errors['err_u_mag']:.3e} | "
+                f"err_p={errors['err_p']:.3e} | "
+                f"FOM_time={fom_time:.3f}s | "
+                f"ROM_time={rom_time:.6f}s | "
+                f"speedup={speedup:.2f}x"
+            )
+
+        print("\n" + "-" * 100)
+        print("[Metrics] Summary")
+        print("-" * 100)
+        print(f"FOM dofs              : {fom_dofs}")
+        print(f"ROM dofs              : {rom_dofs}")
+        print(f"Compression ratio     : {compression_ratio:.2f}x")
+        self.print_metric_summary("err_U", results["err_U"])
+        self.print_metric_summary("err_u_x", results["err_u_x"])
+        self.print_metric_summary("err_u_y", results["err_u_y"])
+        self.print_metric_summary("err_u_mag", results["err_u_mag"])
+        self.print_metric_summary("err_p", results["err_p"])
+        self.print_metric_summary("FOM time [s]", results["fom_times"])
+        self.print_metric_summary("ROM time [s]", results["rom_times"])
+        self.print_metric_summary("speedup", results["speedups"])
+        self.print_metric_summary("FOM Newton it.", results["fom_iterations"])
+        self.print_metric_summary("ROM Newton it.", results["rom_iterations"])
+        print("=" * 100)
+
+        results["fom_dofs"] = fom_dofs
+        results["rom_dofs"] = rom_dofs
+        results["compression_ratio"] = compression_ratio
+
+        per_sample_csv = os.path.join(results_folder, "fom_vs_pod_galerkin_metrics.csv")
+        with open(per_sample_csv, "w", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=list(per_sample_rows[0].keys()))
+            writer.writeheader()
+            writer.writerows(per_sample_rows)
+
+        summary_rows = []
+        summary_data = {
+            "err_U": results["err_U"],
+            "err_u_x": results["err_u_x"],
+            "err_u_y": results["err_u_y"],
+            "err_u_mag": results["err_u_mag"],
+            "err_p": results["err_p"],
+            "fom_time_s": results["fom_times"],
+            "rom_time_s": results["rom_times"],
+            "speedup": results["speedups"],
+            "fom_iterations": results["fom_iterations"],
+            "rom_iterations": results["rom_iterations"]
+        }
+
+        for metric_name, values in summary_data.items():
+            values = np.asarray(values)
+            summary_rows.append({
+                "metric": metric_name,
+                "mean": np.mean(values),
+                "max": np.max(values),
+                "min": np.min(values),
+                "std": np.std(values)
+            })
+
+        summary_rows.append({
+            "metric": "fom_dofs",
+            "mean": fom_dofs,
+            "max": fom_dofs,
+            "min": fom_dofs,
+            "std": 0.0
+        })
+
+        summary_rows.append({
+            "metric": "rom_dofs",
+            "mean": rom_dofs,
+            "max": rom_dofs,
+            "min": rom_dofs,
+            "std": 0.0
+        })
+
+        summary_rows.append({
+            "metric": "compression_ratio",
+            "mean": compression_ratio,
+            "max": compression_ratio,
+            "min": compression_ratio,
+            "std": 0.0
+        })
+
+        summary_csv = os.path.join(results_folder, "fom_vs_pod_galerkin_summary.csv")
+        with open(summary_csv, "w", newline="") as file:
+            writer = csv.DictWriter(file, fieldnames=["metric", "mean", "max", "min", "std"])
+            writer.writeheader()
+            writer.writerows(summary_rows)
+
+        print(f"[Metrics] Saved per-sample metrics to: {per_sample_csv}")
+        print(f"[Metrics] Saved summary metrics to: {summary_csv}")
+
+        results["per_sample_csv"] = per_sample_csv
+        results["summary_csv"] = summary_csv
+
+        return results
