@@ -925,7 +925,14 @@ class ROMPerformanceEvaluator(object):
         per_sample_rows = []
 
         fom_dofs = self.fom_reference_solution["tot_dofs"]
-        rom_dofs = self.reduced_data["V"].shape[1]
+
+        if "V" in self.reduced_data:
+            rom_dofs = self.reduced_data["V"].shape[1]
+        elif "model_dofs" in self.reduced_data:
+            rom_dofs = self.reduced_data["model_dofs"]
+        else:
+            rom_dofs = np.nan
+
         compression_ratio = fom_dofs / rom_dofs
 
         for test_id, (mu0_test, mu1_test) in enumerate(testing_set):

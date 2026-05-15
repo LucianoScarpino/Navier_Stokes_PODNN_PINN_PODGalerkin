@@ -7,13 +7,15 @@ from other_utilities import export_folder
 from Discretization import Discretize
 from Solver import Solver
 from ROM import ROM_Methods, ROM_NN_Methods, ROMPerformanceEvaluator
+from PINN import PINN_Methods
 
 file_path, mesh_path, solution_path = export_folder("./Export")
 reduced_model_path = file_path + "/Models/reduced_model.pkl"
 podnn_model_path = file_path + "/Models/podnn_model.pkl"
+pinn_model_path = file_path + "/Models/pinn_model.pkl"
 
-# Available: 'PODGalerkin', 'PODNN', 'all'
-method = 'all' 
+# Available: 'PODGalerkin', 'PODNN', 'PINN', 'all'
+method = 'PINN' 
 visualize = True
 
 mesh_size = 0.001
@@ -65,8 +67,6 @@ FOM_solution, FOM_Operators, FOM_data = solver.solve_FOM(p_boundary_info,
                                                 max_iterations=max_it,
                                                 plot_solution=visualize)
 
-#---------------------------------------------------------------------------------#
-
 # Set POD parameters
 np.random.seed(26)
 
@@ -85,6 +85,8 @@ training_set = np.random.uniform(low=P[:, 0], high=P[:, 1], size=(snapshot_num, 
 # Offline
 rom = ROM_Methods(FOM_solution,FOM_Operators,FOM_data,training_set=training_set)
 reduced_elements = rom.reduce(solver,p_boundary_info,u_boundary_info,tol=tol,N_max=N_max)
+
+#---------------------------------------------------------------------------------#
 
 if method == 'PODGalerkin' or method == 'all':
     # Evaluate the model performance
@@ -249,5 +251,109 @@ if method == 'PODNN' or method == 'all':
     print()
     print('='*100)
 
-if method not in ['PODGalerkin', 'PODNN', 'all']:
+if method == 'PINN' or method == 'all':
+    # Offline PINN training
+    pinn = PINN_Methods(
+        mu0_range=mu0_range,
+        mu1_range=mu1_range,
+        fom_data=FOM_data
+    )
+
+    pinn_model = pinn.build_network(
+        width=128,
+        latent_dim=64,
+        n_residual_blocks=4
+    )
+
+    pinn_model, pinn_history = pinn.train(
+        model=pinn_model,
+        n_epochs=2000, #<- len(training)
+        n_interior=4096,
+        n_boundary=1024,
+        learning_rate=1.0e-3,
+        weight_decay=1.0e-8,
+        lambda_pde=1.0,
+        lambda_divergence=1.0,
+        lambda_boundary=10.0,
+        lambda_pressure_anchor=1.0,
+        print_every=500
+    )
+
+    pinn_reduced_data = {
+        "speed_n_dofs": FOM_solution["speed_n_dofs"],
+        "model_dofs": sum(parameter.numel() for parameter in pinn_model.parameters())
+    }
+
+    # Evaluate PINN performance
+    pinn_metrics_evaluator = ROMPerformanceEvaluator(
+        solver=solver,
+        rom=pinn,
+        reduced_data=pinn_reduced_data,
+        p_boundary_info=p_boundary_info,
+        u_boundary_info=u_boundary_info,
+        fom_reference_solution=FOM_solution,
+        parameter_ranges=P,
+        newton_tol=tol,
+        max_iterations=max_it,
+        reduced_solver=lambda mu0_test, 
+        mu1_test: pinn.solve_PINN_on_FEM_dofs(
+                                            model=pinn_model,
+                                            mu0=mu0_test,
+                                            mu1=mu1_test,
+                                            plot_solution=False
+                                            ),
+        method_name="PINN",
+        results_prefix="fom_vs_pinn"
+    )
+
+    pinn_metrics_results = pinn_metrics_evaluator.evaluate(
+        n_test=10,
+        seed=123,
+        results_folder="./Results/PINN"
+    )
+
+    # Save PINN model to run it online in -> "PINN_online.py"
+    pinn.save_PINN_model(
+        model=pinn_model,
+        export_path=pinn_model_path,
+        metadata={
+            "mu0_range": mu0_range,
+            "mu1_range": mu1_range,
+            "width": 128,
+            "latent_dim": 64,
+            "n_residual_blocks": 4,
+            "epochs": 2000,
+            "learning_rate": 1.0e-3,
+            "weight_decay": 1.0e-8
+        }
+    )
+
+    # Online PINN evaluation
+    mu0 = 1.0
+    mu1 = 2.0
+
+    print("\n[Online] Solving PINN")
+    print(f"[Online] mu0={mu0}, mu1={mu1}")
+
+    pinn_sol = pinn.solve_PINN_on_FEM_dofs(
+        model=pinn_model,
+        mu0=mu0,
+        mu1=mu1,
+        plot_solution=visualize
+    )
+
+    print("\n[Online] Completed")
+    print(f"[Online] converged={pinn_sol['converged']}")
+    print(f"[Online] iterations={pinn_sol['iterations']}")
+    print(f"[Online] relative_increment={pinn_sol['relative_increment']}")
+    print(f"[Online] reconstructed solution shape={pinn_sol['u'].shape}")
+
+    print("\n[Online] Solution components")
+    print(f"u_x_pinn shape={pinn_sol['u_x'].shape}")
+    print(f"u_y_pinn shape={pinn_sol['u_y'].shape}")
+    print(f"p_pinn shape={pinn_sol['p'].shape}")
+    print()
+    print('='*100)
+
+if method not in ['PODGalerkin', 'PODNN', 'PINN', 'all']:
     raise ValueError(f"Unknown method: {method}")
