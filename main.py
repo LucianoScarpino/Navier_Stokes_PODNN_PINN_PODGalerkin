@@ -267,7 +267,7 @@ if method == 'PINN' or method == 'all':
 
     pinn_model, pinn_history = pinn.train(
         model=pinn_model,
-        n_epochs=2000, #<- len(training)
+        n_epochs=10000, #<- len(training)
         n_interior=4096,
         n_boundary=1024,
         learning_rate=1.0e-3,
@@ -322,7 +322,7 @@ if method == 'PINN' or method == 'all':
             "width": 128,
             "latent_dim": 64,
             "n_residual_blocks": 4,
-            "epochs": 2000,
+            "epochs": 10000,
             "learning_rate": 1.0e-3,
             "weight_decay": 1.0e-8
         }
