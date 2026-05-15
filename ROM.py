@@ -1,5 +1,7 @@
 import numpy as np
 import scipy
+import pickle
+import os
 
 from pypolydim import polydim
 from other_utilities import make_np_sparse
@@ -11,6 +13,43 @@ class ROM_Methods(object):
         self.operators = operators
         self.fom_sol = fom_sol
         self.fom_data = fom_data
+
+    def save_reduced_model(self, reduced_data, export_path, metadata=None):
+        reduced_model = {
+            "reduced_data": reduced_data,
+            "fom_data": self.fom_data,
+            "metadata": metadata if metadata is not None else {}
+        }
+
+        temporary_path = export_path + ".tmp"
+
+        with open(temporary_path, "wb") as file:
+            pickle.dump(reduced_model, file, protocol=pickle.HIGHEST_PROTOCOL)
+
+        import os
+        os.replace(temporary_path, export_path)
+
+        print(f"[ROM] Reduced model saved to: {export_path}")
+
+    @staticmethod
+    def load_reduced_model(export_path):
+
+        if not os.path.exists(export_path):
+            raise FileNotFoundError(
+                f"Reduced model file not found: {export_path}. Run the offline script first."
+            )
+
+        if os.path.getsize(export_path) == 0:
+            raise ValueError(
+                f"Reduced model file is empty: {export_path}. Delete it and rerun the offline script to regenerate it."
+            )
+
+        with open(export_path, "rb") as file:
+            reduced_model = pickle.load(file)
+
+        print(f"[ROM] Reduced model loaded from: {export_path}")
+
+        return reduced_model
 
     def solve_POD_Galerkin(self, reduced_data, mu0, mu1, newton_tol=1e-6, max_iterations=10):
         """

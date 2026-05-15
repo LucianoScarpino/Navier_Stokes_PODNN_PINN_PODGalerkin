@@ -9,8 +9,9 @@ from Solver import Solver
 from ROM import ROM_Methods
 
 file_path, mesh_path, solution_path = export_folder("./Export")
+reduced_model_path = file_path + "/Models/reduced_model.pkl"
 
-mesh_size = 0.001
+mesh_size = 0.01
 domain_area = 1.0
 vertices = np.array([[0.0, 1.0, 1.0, 0.0],
                      [0.0, 0.0, 1.0, 1.0],
@@ -62,7 +63,12 @@ FOM_solution, FOM_Operators, FOM_data = solver.solve_FOM(p_boundary_info,
 # Set POD parameters
 np.random.seed(26)
 
+# Number of snapshots used to build POD
 snapshot_num = 100
+
+# MAximum number of POD retained
+N_max = 100
+
 mu0_range = [1., 10.]
 mu1_range = [1., 3.]
 
@@ -71,9 +77,22 @@ training_set = np.random.uniform(low=P[:, 0], high=P[:, 1], size=(snapshot_num, 
 
 # Offline
 rom = ROM_Methods(FOM_solution,FOM_Operators,FOM_data,training_set=training_set)
-reduced_elements = rom.reduce(solver,p_boundary_info,u_boundary_info,tol=tol,N_max=snapshot_num)
+reduced_elements = rom.reduce(solver,p_boundary_info,u_boundary_info,tol=tol,N_max=N_max)
+
+# Save Reduced Model to run it online in -> "POD_online.py"
+rom.save_reduced_model(
+    reduced_elements,
+    reduced_model_path,
+    metadata={
+        "snapshot_num": snapshot_num,
+        "mu0_range": mu0_range,
+        "mu1_range": mu1_range,
+        "tol": tol,
+        "N_max": N_max
+    }
+)
 
 # Online
-mu0 = 2
-mu1 = 2
-rom_sol = rom.solve_POD_Galerkin(reduced_elements,mu0=mu0,mu1=mu1,newton_tol=tol,max_iterations=max_it)
+#mu0 = 2
+#mu1 = 2
+#rom_sol = rom.solve_POD_Galerkin(reduced_elements,mu0=mu0,mu1=mu1,newton_tol=tol,max_iterations=max_it)
