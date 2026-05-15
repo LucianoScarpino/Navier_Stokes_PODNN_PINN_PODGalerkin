@@ -10,7 +10,7 @@ from ROM import ROM_Methods
 
 file_path, mesh_path, solution_path = export_folder("./Export")
 
-mesh_size = 0.05
+mesh_size = 0.001
 domain_area = 1.0
 vertices = np.array([[0.0, 1.0, 1.0, 0.0],
                      [0.0, 0.0, 1.0, 1.0],
