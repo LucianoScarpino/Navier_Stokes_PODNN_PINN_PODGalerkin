@@ -11,12 +11,10 @@ class Assembler(object):
                     self.pressure_dofs_data,self.pressure_mesh_dofs_info,self.pressure_reference_element_data = configuration
         
     def assemble_linear_system(self,speed_n_dofs:int,pressure_n_dofs:int,tot_dofs:int,mu0:float,mu1:float):
-        self.mu0 = mu0
-        self.mu1 = mu1
 
         A_operator = self.assemble_A_operator()
         B_x_operator, B_y_operator = self.assemble_B_operator()
-        f_x_function,f_y_function = self.build_f_components()
+        f_x_function,f_y_function = self.build_f_components(mu1)
         f_S = self.assemble_f(f_x_function, f_y_function, pressure_n_dofs)
         u_x_strong,u_y_strong = self.assemble_u_strong()
         p_strong = self.assemble_p_strong()
@@ -61,7 +59,7 @@ class Assembler(object):
 
         J_A = J_A_x + J_A_y
         J_B = J_B_x + J_B_y + J_BT_x + J_BT_y
-        J_S = self.mu0 * J_A - J_B
+        J_S = mu0 * J_A - J_B
 
         return {
             "J_S": J_S,
@@ -82,14 +80,14 @@ class Assembler(object):
             "B_y_operator": B_y_operator
         }
 
-    def build_f_components(self):
+    def build_f_components(self,mu1:float):
         def f_x_function(x:float,y:float,z:float):
-            return -(self.mu1**3 * np.pi**2 * np.cos(self.mu1**2 * np.pi * x)- self.mu1**2 * np.pi**2) * np.sin(self.mu1 * np.pi * y) * np.cos(self.mu1 * np.pi * y) \
-                    + (self.mu1 * np.pi * np.cos(self.mu1 * np.pi * x) * np.cos(self.mu1 * np.pi * y))
+            return -(mu1**3 * np.pi**2 * np.cos(mu1**2 * np.pi * x)- mu1**2 * np.pi**2) * np.sin(mu1 * np.pi * y) * np.cos(mu1 * np.pi * y) \
+                    + (mu1 * np.pi * np.cos(mu1 * np.pi * x) * np.cos(mu1 * np.pi * y))
         
         def f_y_function(x:float,y:float,z:float):
-            return -(-self.mu1**3 * np.pi**2 * np.cos(self.mu1**2 * np.pi * y)+ self.mu1**2 * np.pi**2) * np.sin(self.mu1 * np.pi * x) * np.cos(self.mu1 * np.pi * x) \
-                    + (-self.mu1 * np.pi * np.sin(self.mu1 * np.pi * x) * np.sin(self.mu1 * np.pi * y))
+            return -(mu1**3 * np.pi**2 * np.cos(mu1**2 * np.pi * y)+ mu1**2 * np.pi**2) * np.sin(mu1 * np.pi * x) * np.cos(mu1 * np.pi * x) \
+                    + (-mu1 * np.pi * np.sin(mu1 * np.pi * x) * np.sin(mu1 * np.pi * y))
 
         return f_x_function,f_y_function
     

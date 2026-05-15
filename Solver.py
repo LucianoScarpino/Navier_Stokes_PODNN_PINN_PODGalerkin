@@ -247,7 +247,9 @@ class Solver(object):
                 'J_BT_y': operators["J_BT_y"],
                 'A_operator': operators["A_operator"],
                 'B_x_operator': operators["B_x_operator"],
-                'B_y_operator': operators["B_y_operator"]
+                'B_y_operator': operators["B_y_operator"],
+                "J_A": operators["J_A"],
+                "J_B": operators["J_B"],
                 }
 
         sol = {
@@ -262,8 +264,26 @@ class Solver(object):
                 "pressure_n_dofs": pressure_n_dofs,
                 "tot_dofs": tot_dofs
                 }
+        
+        fem_data = {
+                    "geometry_utilities": self.geometry_utilities,
+                    "mesh": self.mesh,
+                    "mesh_geometric_data": self.mesh_geometric_data,
+                    "pressure_reference_element_data": pressure_reference_element_data,
+                    "speed_reference_element_data": speed_reference_element_data,
+                    "pressure_mesh_dofs_info": pressure_mesh_dofs_info,
+                    "pressure_dofs_data": pressure_dofs_data,
+                    "speed_mesh_dofs_info": speed_mesh_dofs_info,
+                    "speed_dofs_data": speed_dofs_data,
+                    "speed_n_strongs": speed_n_strongs,
+                    "pressure_n_strongs": pressure_n_strongs,
+                    "u_x_strong": u_x_strong,
+                    "u_y_strong": u_y_strong,
+                    "p_strong": p_strong,
+                    "assembler": assembler
+                    }
 
-        return sol,ops   
+        return sol,ops,fem_data   
 
 
     def speed_x_initial_condition(self,x, y, z):  

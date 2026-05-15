@@ -1,17 +1,86 @@
 import numpy as np
 import scipy
 
+from pypolydim import polydim
 from other_utilities import make_np_sparse
 
+
 class ROM_Methods(object):
-    def __init__(self,fom_sol,operators,training_set):
+    def __init__(self,fom_sol,operators,fom_data,training_set):
         self.training_set = training_set
         self.operators = operators
         self.fom_sol = fom_sol
+        self.fom_data = fom_data
 
-    def solve_POD_Galerkin(self):
-        pass
+    def solve_POD_Galerkin(self, reduced_data, mu0, mu1, newton_tol=1e-6, max_iterations=10):
+        """
+        Online POD-Galerkin solver.
 
+        This method intentionally works only with reduced quantities.
+        The nonlinear reduced convection operators must be precomputed offline
+        and stored in reduced_data before calling this method.
+        """
+
+        V = reduced_data["V"]
+        J_A_N = reduced_data["J_A_N"]
+        J_B_N = reduced_data["J_B_N"]
+        C_jacobian_tensor = reduced_data["C_jacobian_tensor"]
+        C_residual_tensor = reduced_data["C_residual_tensor"]
+
+        assembler = self.fom_data["assembler"]
+        f_N = self.assemble_reduced_rhs(assembler,mu1,V)
+
+        n_red = V.shape[1]
+        a_k = np.zeros(n_red)
+
+        increment_norm = 1.0
+        solution_norm = 1.0
+        num_iteration = 1
+
+        J_S_N = mu0 * J_A_N - J_B_N
+
+        while num_iteration < max_iterations and increment_norm > newton_tol * solution_norm:
+            C_residual_N = np.einsum("ijk,j,k->i", C_residual_tensor, a_k, a_k)
+            J_C_N = np.einsum("ijk,k->ij", C_jacobian_tensor, a_k)
+
+            rhs_N = f_N - C_residual_N - J_S_N @ a_k
+            da = np.linalg.solve(J_S_N + J_C_N, rhs_N)
+
+            a_k = a_k + da
+
+            increment_norm = np.linalg.norm(da)
+            solution_norm = max(np.linalg.norm(a_k), 1e-14)
+
+            print(
+                f"[ROM Newton] iter {num_iteration:02d}/{max_iterations} | "
+                f"||da||/||a||={increment_norm / solution_norm:.3e} | "
+                f"tol={newton_tol:.1e}"
+            )
+
+            num_iteration += 1
+
+        U_N = V @ a_k
+
+
+        print("\n" + "-" * 100)
+        print("[Online ROM] Solving POD-Galerkin reduced problem")
+        print(f"[Online ROM] mu0={mu0}, mu1={mu1}, newton_tol={newton_tol}, max_iterations={max_iterations}")
+        print("\n[Online ROM] Completed")
+        print(f"[Online ROM] converged={increment_norm <= newton_tol * solution_norm}")
+        print(f"[Online ROM] iterations={num_iteration - 1}")
+        print(f"[Online ROM] relative_increment={increment_norm / solution_norm}")
+        print(f"[Online ROM] reduced_coefficients_shape={a_k.shape}")
+        print(f"[Online ROM] reconstructed_solution_shape={U_N.shape}")
+        print("=" * 100)
+
+        return {
+            "u": U_N,
+            "coefficients": a_k,
+            "iterations": num_iteration - 1,
+            "relative_increment": increment_norm / solution_norm,
+            "converged": increment_norm <= newton_tol * solution_norm
+        }
+    
     def reduce(self,
                 solver,
                 p_boundary_info,
@@ -31,10 +100,10 @@ class ROM_Methods(object):
 
         # Inner product = X1 + X2 (Grad-Grad)
         inner_product_u,B_1,B_2 = self.assemble_supremizer_matricies(A_op,
-                                                                    B_x_op,
-                                                                    B_y_op,
-                                                                    speed_n_dofs,
-                                                                    pressure_n_dofs)
+                                                                     B_x_op,
+                                                                     B_y_op,
+                                                                     speed_n_dofs,
+                                                                     pressure_n_dofs)
         snapshot_matrix_u, snapshot_matrix_s,\
               snapshot_matrix_p, C_u, C_s, C_p = self.create_POD_matricies( solver,
                                                                             p_boundary_info,
@@ -69,6 +138,12 @@ class ROM_Methods(object):
         J_A_N = self.assemble_reduced_matrix(V, J_A)
         J_B_N = self.assemble_reduced_matrix(V, J_B)
 
+        C_residual_tensor, C_jacobian_tensor = self.precompute_reduced_convective_tensors(solver,V)
+
+        print("\n" + "-" * 100)
+        print("[Offline ROM] Starting POD basis construction and reduced operator assembly")
+        print("-" * 100)
+
         return {
             "V": V,
             "J_A_N": J_A_N,
@@ -81,8 +156,116 @@ class ROM_Methods(object):
             "N_p": N_p,
             "basis_functions_u": basis_functions_u,
             "basis_functions_s": basis_functions_s,
-            "basis_functions_p": basis_functions_p
+            "basis_functions_p": basis_functions_p,
+            "C_jacobian_tensor": C_jacobian_tensor,
+            "C_residual_tensor": C_residual_tensor
             }
+
+    def precompute_reduced_convective_tensors(self, solver, V):
+        """
+        Offline precomputation of the reduced quadratic convection term.
+
+        This method uses the FEM data already generated by the FOM solver and
+        stored in self.fom_data.
+
+        The residual tensor satisfies
+            C_N(a)_i = sum_{j,k} C_residual_tensor[i,j,k] a_j a_k.
+
+        The Jacobian tensor satisfies
+            J_C_N(a)_{i,j} = sum_k C_jacobian_tensor[i,j,k] a_k.
+        """
+
+        geometry_utilities = self.fom_data["geometry_utilities"]
+        mesh = self.fom_data["mesh"]
+        mesh_geometric_data = self.fom_data["mesh_geometric_data"]
+        speed_dofs_data = self.fom_data["speed_dofs_data"]
+        speed_reference_element_data = self.fom_data["speed_reference_element_data"]
+        u_x_strong = self.fom_data["u_x_strong"]
+        u_y_strong = self.fom_data["u_y_strong"]
+
+        speed_n_dofs = self.fom_sol["speed_n_dofs"]
+        pressure_n_dofs = self.fom_sol["pressure_n_dofs"]
+
+        n_red = V.shape[1]
+        C_residual_tensor = np.zeros((n_red, n_red, n_red))
+
+        def project_convective_rhs(full_vector):
+            u_x_numeric = full_vector[0:speed_n_dofs]
+            u_y_numeric = full_vector[speed_n_dofs:2 * speed_n_dofs]
+
+            c_operator = polydim.pde_tools.assembler_utilities.pcc_2_d.assemble_ns_operators(
+                geometry_utilities,
+                mesh,
+                mesh_geometric_data,
+                speed_dofs_data,
+                speed_reference_element_data,
+                u_x_numeric,
+                u_y_numeric,
+                u_x_strong,
+                u_y_strong
+            )
+
+            f_C = np.concatenate([
+                c_operator.convective_rhs,
+                np.zeros(pressure_n_dofs)
+            ])
+
+            return self.assemble_reduced_vector(V, f_C)
+
+        print("Precomputing reduced convective tensors...")
+
+        single_terms = []
+        for j in range(n_red):
+            single_terms.append(project_convective_rhs(V[:, j]))
+
+        for j in range(n_red):
+            C_residual_tensor[:, j, j] = single_terms[j]
+
+            for k in range(j + 1, n_red):
+                mixed_term = 0.5 * (
+                    project_convective_rhs(V[:, j] + V[:, k])
+                    - single_terms[j]
+                    - single_terms[k]
+                )
+
+                C_residual_tensor[:, j, k] = mixed_term
+                C_residual_tensor[:, k, j] = mixed_term
+
+        C_jacobian_tensor = C_residual_tensor + np.swapaxes(C_residual_tensor, 1, 2)
+
+        return C_residual_tensor, C_jacobian_tensor
+
+    def assemble_reduced_rhs(self, assembler, mu1, V):
+
+        f_x_function, f_y_function = assembler.build_f_components(mu1)
+
+        f_x = polydim.pde_tools.assembler_utilities.pcc_2_d.assemble_source_term(
+            self.fom_data["geometry_utilities"],
+            self.fom_data["mesh"],
+            self.fom_data["mesh_geometric_data"],
+            self.fom_data["speed_dofs_data"],
+            self.fom_data["speed_reference_element_data"],
+            self.fom_data["speed_reference_element_data"],
+            f_x_function
+        )
+
+        f_y = polydim.pde_tools.assembler_utilities.pcc_2_d.assemble_source_term(
+            self.fom_data["geometry_utilities"],
+            self.fom_data["mesh"],
+            self.fom_data["mesh_geometric_data"],
+            self.fom_data["speed_dofs_data"],
+            self.fom_data["speed_reference_element_data"],
+            self.fom_data["speed_reference_element_data"],
+            f_y_function
+        )
+
+        f_S = np.concatenate([
+            f_x,
+            f_y,
+            np.zeros(self.fom_sol["pressure_n_dofs"])
+        ])
+
+        return self.assemble_reduced_vector(V, f_S)
 
     def create_POD_matricies(self,
                                 solver,
@@ -110,14 +293,19 @@ class ROM_Methods(object):
                 f"mu0={mu0:.4g}, mu1={mu1:.4g}"
             )
 
-            solution = solver.solve_FOM(
-                                        p_boundary_info = p_boundary_info,
-                                        u_boundary_info = u_boundary_info,
-                                        mu0=mu0,
-                                        mu1=mu1,
-                                        newton_tol=tol,
-                                        max_iterations=N_max
-                                        )
+            fom_result = solver.solve_FOM(
+                p_boundary_info=p_boundary_info,
+                u_boundary_info=u_boundary_info,
+                mu0=mu0,
+                mu1=mu1,
+                newton_tol=tol,
+                max_iterations=N_max
+            )
+
+            if isinstance(fom_result, tuple):
+                solution = fom_result[0]
+            else:
+                solution = fom_result
 
             snapshot = solution["u"]
 
@@ -159,36 +347,37 @@ class ROM_Methods(object):
     def assemble_reduced_vector(self, basis, fom_vector):
         return basis.T @ fom_vector
     
-    def eig_analysis(C, N_max=None, tol=1e-9):
-        L_e, VM_e = np.linalg.eig(C)
-        eigenvalues = []
-        eigenvectors = []
+    def eig_analysis(self, C, N_max=None, tol=1e-9):
+        eigenvalues, eigenvectors_matrix = np.linalg.eigh(C)
 
-        for i in range(len(L_e)):
-            eig_real = L_e[i].real
-            eig_complex = L_e[i].imag
-            assert np.isclose(eig_complex, 0.)
-            eigenvalues.append(eig_real)
-            eigenvectors.append(VM_e[i].real)
+        order = np.argsort(eigenvalues)[::-1]
+        eigenvalues = eigenvalues[order].real
+        eigenvectors_matrix = eigenvectors_matrix[:, order].real
 
-        total_energy = sum(eigenvalues)
-        retained_energy_vector = np.cumsum(eigenvalues)
-        relative_retained_energy = retained_energy_vector/total_energy
+        eigenvalues = np.maximum(eigenvalues, 0.0)
+        total_energy = np.sum(eigenvalues)
 
-        if all(flag==False for flag in relative_retained_energy>= tol) and N_max != None:
-            N = N_max
-        else:
-            N = np.argmax(relative_retained_energy >= tol) + 1
-        
+        if total_energy <= 0.0:
+            raise ValueError("POD covariance matrix has zero total energy.")
+
+        relative_retained_energy = np.cumsum(eigenvalues) / total_energy
+        target_energy = 1.0 - tol
+        N = np.argmax(relative_retained_energy >= target_energy) + 1
+
+        if N_max is not None:
+            N = min(N, N_max)
+
+        eigenvectors = [eigenvectors_matrix[:, i] for i in range(N)]
+
         return N, eigenvectors
     
-    def create_basis_functions_matrix(N, snapshot_matrix, eigenvectors, inner_product=None):
+    def create_basis_functions_matrix(self, N, snapshot_matrix, eigenvectors, inner_product=None):
         basis_functions = []
         
         for n in range(N):
             eigenvector =  eigenvectors[n]
             basis = np.transpose(snapshot_matrix)@eigenvector
-            if inner_product!= None:
+            if inner_product is not None:
                 norm = np.sqrt(np.transpose(basis) @ inner_product @ basis) ## metti inner product
             else:
                 norm = np.sqrt(np.transpose(basis) @ basis)
