@@ -21,7 +21,8 @@ class Solver(object):
         mu1: float,
         newton_tol: float = 1.0e-6,
         max_iterations: int = 10,
-        plot_solution: str = False
+        plot_solution: str = False,
+        plot_path:str = "./Plots/FOM"
         ):
         
         pressure_reference_element_data,speed_reference_element_data,\
@@ -234,7 +235,8 @@ class Solver(object):
                             p_numeric,
                             p_strong,
                             self.vtk_utilities,
-                            self.export_path
+                            self.export_path,
+                            plot_path
                             )
         
         ops = {
@@ -267,6 +269,7 @@ class Solver(object):
         
         fem_data = {
                     "geometry_utilities": self.geometry_utilities,
+                    "vtk_utilities": self.vtk_utilities,
                     "mesh": self.mesh,
                     "mesh_geometric_data": self.mesh_geometric_data,
                     "pressure_reference_element_data": pressure_reference_element_data,

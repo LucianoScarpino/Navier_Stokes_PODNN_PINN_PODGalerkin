@@ -102,7 +102,7 @@ def export_folder(file_path):
         os.makedirs(export_mesh_path)
 
     # Solution file path
-    export_solution_path = export_file_path + "/Solution"
+    export_solution_path = export_file_path + "/Solution/FOM"
     if not os.path.exists(export_solution_path):
         os.makedirs(export_solution_path)
 
@@ -118,7 +118,8 @@ def plot_FOM_solution(mesh,
                       p_numeric,
                       p_strong,
                       vtk_utilities,
-                      export_solution_path
+                      export_solution_path,
+                      plot_path
                       ):
     
 
@@ -169,9 +170,9 @@ def plot_FOM_solution(mesh,
                                     zero_cell0
                                     )
     
-    plot_solution(mesh, u_x_on_cell0Ds.numeric_solution, "u_x",export_folder='./Plots') 
-    plot_solution(mesh, u_y_on_cell0Ds.numeric_solution, "u_y",export_folder='./Plots')
+    plot_solution(mesh, u_x_on_cell0Ds.numeric_solution, "u_x",export_folder=plot_path) 
+    plot_solution(mesh, u_y_on_cell0Ds.numeric_solution, "u_y",export_folder=plot_path)
     plot_solution(mesh, np.sqrt(u_x_on_cell0Ds.numeric_solution * u_x_on_cell0Ds.numeric_solution +\
                         u_y_on_cell0Ds.numeric_solution * u_y_on_cell0Ds.numeric_solution), 
-                        "u_mag",export_folder='./Plots')
-    plot_solution(mesh, p_on_cell0Ds.numeric_solution, "p",export_folder='./Plots') 
+                        "u_mag",export_folder=plot_path)
+    plot_solution(mesh, p_on_cell0Ds.numeric_solution, "p",export_folder=plot_path) 

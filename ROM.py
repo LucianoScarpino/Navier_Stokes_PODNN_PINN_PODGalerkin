@@ -4,7 +4,7 @@ import pickle
 import os
 
 from pypolydim import polydim
-from other_utilities import make_np_sparse
+from other_utilities import make_np_sparse,plot_FOM_solution
 
 
 class ROM_Methods(object):
@@ -17,17 +17,11 @@ class ROM_Methods(object):
     def save_reduced_model(self, reduced_data, export_path, metadata=None):
         reduced_model = {
             "reduced_data": reduced_data,
-            "fom_data": self.fom_data,
             "metadata": metadata if metadata is not None else {}
         }
 
-        temporary_path = export_path + ".tmp"
-
-        with open(temporary_path, "wb") as file:
+        with open(export_path, "wb") as file:
             pickle.dump(reduced_model, file, protocol=pickle.HIGHEST_PROTOCOL)
-
-        import os
-        os.replace(temporary_path, export_path)
 
         print(f"[ROM] Reduced model saved to: {export_path}")
 
@@ -47,11 +41,13 @@ class ROM_Methods(object):
         with open(export_path, "rb") as file:
             reduced_model = pickle.load(file)
 
+        print()
+        print('='*100)
         print(f"[ROM] Reduced model loaded from: {export_path}")
 
         return reduced_model
 
-    def solve_POD_Galerkin(self, reduced_data, mu0, mu1, newton_tol=1e-6, max_iterations=10):
+    def solve_POD_Galerkin(self, reduced_data, mu0, mu1, newton_tol=1e-6, max_iterations=10,plot_solution=False):
         """
         Online POD-Galerkin solver.
 
@@ -66,8 +62,7 @@ class ROM_Methods(object):
         C_jacobian_tensor = reduced_data["C_jacobian_tensor"]
         C_residual_tensor = reduced_data["C_residual_tensor"]
 
-        assembler = self.fom_data["assembler"]
-        f_N = self.assemble_reduced_rhs(assembler,mu1,V)
+        f_N = self.evaluate_reduced_rhs_nn(mu1, reduced_data)
 
         n_red = V.shape[1]
         a_k = np.zeros(n_red)
@@ -110,7 +105,10 @@ class ROM_Methods(object):
         print(f"[Online ROM] relative_increment={increment_norm / solution_norm}")
         print(f"[Online ROM] reduced_coefficients_shape={a_k.shape}")
         print(f"[Online ROM] reconstructed_solution_shape={U_N.shape}")
-        print("=" * 100)
+        print("-" * 100)
+
+        if plot_solution:
+            self.plot_ROM_solution(reduced_data,U_N,self.fom_data['vtk_utilities'])
 
         return {
             "u": U_N,
@@ -119,6 +117,54 @@ class ROM_Methods(object):
             "relative_increment": increment_norm / solution_norm,
             "converged": increment_norm <= newton_tol * solution_norm
         }
+    
+    def plot_ROM_solution(
+        self,
+        reduced_data,
+        U_N,
+        vtk_utilities,
+        export_solution_path="./Export/Solution/POD_Galerkin",
+        plot_path = "./Plots/POD_Galerkin"
+        ):
+        """
+        Plot/export a reconstructed ROM solution.
+
+        This method intentionally remains separate from solve_POD_Galerkin.
+        Pure online execution loaded from a reduced_model.pkl does not contain
+        FEM mesh/dof objects, because they are not pickle-serializable.
+        Therefore plotting is available only when fom_data is present, e.g.
+        during the offline/main workflow.
+        """
+        if self.fom_data is None:
+            raise ValueError(
+                "plot_ROM_solution requires fom_data. It cannot be used with a pure reduced model loaded from pickle."
+            )
+
+        if not os.path.exists(export_solution_path):
+            os.makedirs(export_solution_path)
+
+        if not os.path.exists(plot_path):
+            os.makedirs(plot_path)
+
+        speed_n_dofs = reduced_data["speed_n_dofs"]
+        u_x_rom = U_N[0:speed_n_dofs]
+        u_y_rom = U_N[speed_n_dofs:2 * speed_n_dofs]
+        p_rom = U_N[2 * speed_n_dofs:]
+
+        plot_FOM_solution(
+            mesh=self.fom_data["mesh"],
+            speed_dofs_data=self.fom_data["speed_dofs_data"],
+            u_x_numeric=u_x_rom,
+            u_x_strong=self.fom_data["u_x_strong"],
+            u_y_numeric=u_y_rom,
+            u_y_strong=self.fom_data["u_y_strong"],
+            pressure_dofs_data=self.fom_data["pressure_dofs_data"],
+            p_numeric=p_rom,
+            p_strong=self.fom_data["p_strong"],
+            vtk_utilities=vtk_utilities,
+            export_solution_path=export_solution_path,
+            plot_path= plot_path
+        )
     
     def reduce(self,
                 solver,
@@ -178,6 +224,7 @@ class ROM_Methods(object):
         J_B_N = self.assemble_reduced_matrix(V, J_B)
 
         C_residual_tensor, C_jacobian_tensor = self.precompute_reduced_convective_tensors(solver,V)
+        rhs_nn = self.train_reduced_rhs_nn(V)
 
         print("\n" + "-" * 100)
         print("[Offline ROM] Starting POD basis construction and reduced operator assembly")
@@ -197,7 +244,9 @@ class ROM_Methods(object):
             "basis_functions_s": basis_functions_s,
             "basis_functions_p": basis_functions_p,
             "C_jacobian_tensor": C_jacobian_tensor,
-            "C_residual_tensor": C_residual_tensor
+            "C_residual_tensor": C_residual_tensor,
+            "speed_n_dofs": speed_n_dofs,
+            "rhs_nn": rhs_nn
             }
 
     def precompute_reduced_convective_tensors(self, solver, V):
@@ -274,9 +323,70 @@ class ROM_Methods(object):
 
         return C_residual_tensor, C_jacobian_tensor
 
-    def assemble_reduced_rhs(self, assembler, mu1, V):
+    def train_reduced_rhs_nn(self, V, hidden_neurons=64, ridge=1e-10, seed=26):
+        """
+        Offline training of a small one-hidden-layer neural model for
+        mu1 -> f_N(mu1).
 
-        f_x_function, f_y_function = assembler.build_f_components(mu1)
+        This avoids assembling the FEM right-hand side during the online phase.
+        The hidden layer is fixed randomly and only the output weights are fitted
+        by ridge regression. This is an Extreme Learning Machine, i.e. a shallow NN.
+        """
+        if self.training_set is None:
+            raise ValueError("training_set is required to train the reduced RHS neural model.")
+
+        mu1_values = np.asarray(self.training_set)[:, 1]
+        mu1_values = np.unique(mu1_values)
+
+        x_mean = np.mean(mu1_values)
+        x_std = np.std(mu1_values)
+        if x_std == 0.0:
+            x_std = 1.0
+
+        rng = np.random.default_rng(seed)
+        W_in = rng.normal(loc=0.0, scale=1.0, size=(1, hidden_neurons))
+        b_in = rng.normal(loc=0.0, scale=1.0, size=(hidden_neurons,))
+
+        X = ((mu1_values - x_mean) / x_std).reshape(-1, 1)
+        H = np.tanh(X @ W_in + b_in)
+        H_aug = np.concatenate([H, np.ones((H.shape[0], 1))], axis=1)
+
+        Y = []
+        for mu1 in mu1_values:
+            Y.append(self.assemble_reduced_rhs_from_fem(mu1, V))
+        Y = np.asarray(Y)
+
+        lhs = H_aug.T @ H_aug + ridge * np.eye(H_aug.shape[1])
+        rhs = H_aug.T @ Y
+        W_out = np.linalg.solve(lhs, rhs)
+
+        training_prediction = H_aug @ W_out
+        training_error = np.linalg.norm(training_prediction - Y) / max(np.linalg.norm(Y), 1e-14)
+
+        print(f"[Offline ROM] RHS neural model trained | samples={len(mu1_values)} | hidden={hidden_neurons} | rel_train_error={training_error:.3e}")
+
+        return {
+            "x_mean": x_mean,
+            "x_std": x_std,
+            "W_in": W_in,
+            "b_in": b_in,
+            "W_out": W_out,
+            "hidden_neurons": hidden_neurons,
+            "ridge": ridge,
+            "training_error": training_error
+        }
+
+    def evaluate_reduced_rhs_nn(self, mu1, reduced_data):
+        rhs_nn = reduced_data["rhs_nn"]
+
+        x = np.array([[(mu1 - rhs_nn["x_mean"]) / rhs_nn["x_std"]]])
+        H = np.tanh(x @ rhs_nn["W_in"] + rhs_nn["b_in"])
+        H_aug = np.concatenate([H, np.ones((1, 1))], axis=1)
+
+        return (H_aug @ rhs_nn["W_out"]).ravel()
+
+    def assemble_reduced_rhs_from_fem(self, mu1, V):
+        f_x_function, f_y_function = self.fom_data["assembler"].build_f_components(mu1)
 
         f_x = polydim.pde_tools.assembler_utilities.pcc_2_d.assemble_source_term(
             self.fom_data["geometry_utilities"],

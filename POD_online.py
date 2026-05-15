@@ -6,27 +6,26 @@ reduced_model_path = "./Export/Models/reduced_model.pkl"
 reduced_model = ROM_Methods.load_reduced_model(reduced_model_path)
 
 reduced_data = reduced_model["reduced_data"]
-fom_data = reduced_model["fom_data"]
 metadata = reduced_model["metadata"]
 
-print("=" * 80)
+
 print("[Online] Loaded reduced model")
 print(f"[Online] metadata={metadata}")
 print(f"[Online] V shape={reduced_data['V'].shape}")
-print("=" * 80)
+print("-" * 100)
 
 
 # Rebuild ROM object only with the data needed online
 rom = ROM_Methods(
     fom_sol=None,
     operators=None,
-    fom_data=fom_data,
+    fom_data=None,
     training_set=None
 )
 
 # Choose new online parameter
-mu0 = 2.0
-mu1 = 2.0
+mu0 = 1.0
+mu1 = 3.0
 
 tol = 1.0e-6
 max_it = 10
@@ -39,7 +38,8 @@ rom_sol = rom.solve_POD_Galerkin(
     mu0=mu0,
     mu1=mu1,
     newton_tol=tol,
-    max_iterations=max_it
+    max_iterations=max_it,
+    plot_solution=False
 )
 
 print("\n[Online] Completed")
@@ -51,7 +51,7 @@ print(f"[Online] reconstructed solution shape={rom_sol['u'].shape}")
 
 
 # Split reconstructed ROM solution
-speed_n_dofs = fom_data["speed_n_dofs"]
+speed_n_dofs = reduced_data["speed_n_dofs"]
 
 u_rom = rom_sol["u"]
 u_x_rom = u_rom[0:speed_n_dofs]
@@ -62,3 +62,5 @@ print("\n[Online] Solution components")
 print(f"u_x_rom shape={u_x_rom.shape}")
 print(f"u_y_rom shape={u_y_rom.shape}")
 print(f"p_rom shape={p_rom.shape}")
+print()
+print('='*100)

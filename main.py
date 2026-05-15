@@ -11,7 +11,7 @@ from ROM import ROM_Methods
 file_path, mesh_path, solution_path = export_folder("./Export")
 reduced_model_path = file_path + "/Models/reduced_model.pkl"
 
-mesh_size = 0.01
+mesh_size = 0.001
 domain_area = 1.0
 vertices = np.array([[0.0, 1.0, 1.0, 0.0],
                      [0.0, 0.0, 1.0, 1.0],
@@ -58,7 +58,9 @@ FOM_solution, FOM_Operators, FOM_data = solver.solve_FOM(p_boundary_info,
                                                 mu1=mu1,
                                                 newton_tol=tol,
                                                 max_iterations=max_it,
-                                                plot_solution=False)
+                                                plot_solution=True)
+
+method = 'PODGalerkin'
 
 # Set POD parameters
 np.random.seed(26)
@@ -92,7 +94,42 @@ rom.save_reduced_model(
     }
 )
 
-# Online
-#mu0 = 2
-#mu1 = 2
-#rom_sol = rom.solve_POD_Galerkin(reduced_elements,mu0=mu0,mu1=mu1,newton_tol=tol,max_iterations=max_it)
+if method == 'PODGalerkin':
+    # Online
+    tol = 1.0e-6
+    max_it = 10
+
+    print("\n[Online] Solving POD-Galerkin ROM")
+    print(f"[Online] mu0={mu0}, mu1={mu1}")
+
+    rom_sol = rom.solve_POD_Galerkin(
+        reduced_elements,
+        mu0=mu0,
+        mu1=mu1,
+        newton_tol=tol,
+        max_iterations=max_it,
+        plot_solution=True
+    )
+
+    print("\n[Online] Completed")
+    print(f"[Online] converged={rom_sol['converged']}")
+    print(f"[Online] iterations={rom_sol['iterations']}")
+    print(f"[Online] relative_increment={rom_sol['relative_increment']:.3e}")
+    print(f"[Online] coefficients shape={rom_sol['coefficients'].shape}")
+    print(f"[Online] reconstructed solution shape={rom_sol['u'].shape}")
+
+
+    # Split reconstructed ROM solution
+    speed_n_dofs = reduced_elements["speed_n_dofs"]
+
+    u_rom = rom_sol["u"]
+    u_x_rom = u_rom[0:speed_n_dofs]
+    u_y_rom = u_rom[speed_n_dofs:2 * speed_n_dofs]
+    p_rom = u_rom[2 * speed_n_dofs:]
+
+    print("\n[Online] Solution components")
+    print(f"u_x_rom shape={u_x_rom.shape}")
+    print(f"u_y_rom shape={u_y_rom.shape}")
+    print(f"p_rom shape={p_rom.shape}")
+    print()
+    print('='*100)
