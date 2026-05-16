@@ -2,10 +2,24 @@
 
 This repository contains a comparative study of reduced and surrogate modelling strategies for the parametric steady incompressible Navier–Stokes equations. The goal is to compare projection-based model reduction and neural surrogate approaches in terms of accuracy, online computational cost, speedup and practical usability.
 
-The reference problem is:
+The reference problem is defined on:
 
-$\mu_0 \Delta u + (u \cdot \nabla)u + \nabla p = f(x,y;\mu_1)$,\
-$\nabla \cdot u = 0$,
+$$
+\Omega = [0,1]^2,
+\qquad
+\mu = (\mu_0,\mu_1) \in [1,10]\times[1,3].
+$$
+
+Find the velocity field \(u\) and the pressure \(p\) such that:
+
+$$
+\begin{cases}
+-\mu_0 \Delta u + (u \cdot \nabla)u + \nabla p = f(x,y;\mu_1) & \text{in } \Omega, \\[4pt]
+\nabla \cdot u = 0 & \text{in } \Omega, \\[4pt]
+u = 0 & \text{on } \partial \Omega, \\[4pt]
+p(0,0)=0.
+\end{cases}
+$$
 
 with homogeneous Dirichlet boundary conditions for the velocity and a pressure constraint used to fix the additive constant.
 
