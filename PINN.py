@@ -558,26 +558,60 @@ class PINN_Methods(object):
         return residual_x, residual_y, residual_divergence
 
 
+    def compute_data_loss(self, model, data_points, data_values):
+        """
+        Compute a supervised snapshot loss for the PINN.
+
+        data_points has shape (n_data, 4) and contains:
+            (x, y, mu0, mu1)
+
+        data_values has shape (n_data, 3) and contains:
+            (u_x_FOM, u_y_FOM, p_FOM)
+
+        This term guides the physics-informed training with FOM snapshot values.
+        """
+        if data_points is None or data_values is None:
+            return torch.tensor(0.0, dtype=torch.float32, device=self.device)
+
+        data_points = data_points.to(self.device)
+        data_values = data_values.to(self.device)
+
+        prediction = model(data_points)
+
+        valid_mask = torch.isfinite(data_values)
+        if not torch.any(valid_mask):
+            return torch.tensor(0.0, dtype=torch.float32, device=self.device)
+
+        squared_error = (prediction - torch.nan_to_num(data_values, nan=0.0)) ** 2
+        loss_data = torch.mean(squared_error[valid_mask])
+
+        return loss_data
+
     def compute_loss(
         self,
         model,
         interior_points,
         boundary_points,
+        data_points=None,
+        data_values=None,
         lambda_pde=1.0,
         lambda_divergence=1.0,
         lambda_boundary=10.0,
-        lambda_pressure_anchor=1.0
+        lambda_pressure_anchor=1.0,
+        lambda_data=0.0
     ):
         """
         Compute the full PINN loss.
 
-        The loss contains four terms:
+        The loss contains five possible terms:
             1. momentum residual loss inside the domain,
             2. divergence-free loss inside the domain,
             3. no-slip boundary loss on the boundary,
-            4. pressure anchor loss p(0,0,mu0,mu1)=0.
+            4. pressure anchor loss p(0,0,mu0,mu1)=0,
+            5. optional supervised FOM snapshot loss.
 
         The pressure anchor is needed because pressure is determined up to an additive constant.
+        The supervised term can be used to stabilize the PINN when physics-only training is poor.
         """
         residual_x, residual_y, residual_divergence = self.compute_pde_residuals(
             model,
@@ -624,12 +658,19 @@ class PINN_Methods(object):
             pressure_anchor,
             torch.zeros_like(pressure_anchor)
         )
+        
+        loss_data = self.compute_data_loss(
+            model=model,
+            data_points=data_points,
+            data_values=data_values
+        )
 
         total_loss = (
             lambda_pde * loss_pde
             + lambda_divergence * loss_divergence
             + lambda_boundary * loss_boundary
             + lambda_pressure_anchor * loss_pressure_anchor
+            + lambda_data * loss_data
         )
 
         loss_terms = {
@@ -637,7 +678,8 @@ class PINN_Methods(object):
             "loss_pde": loss_pde,
             "loss_divergence": loss_divergence,
             "loss_boundary": loss_boundary,
-            "loss_pressure_anchor": loss_pressure_anchor
+            "loss_pressure_anchor": loss_pressure_anchor,
+            "loss_data": loss_data
         }
 
         return total_loss, loss_terms
@@ -655,15 +697,18 @@ class PINN_Methods(object):
         lambda_divergence=1.0,
         lambda_boundary=10.0,
         lambda_pressure_anchor=1.0,
+        lambda_data=0.0,
+        data_points=None,
+        data_values=None,
+        data_batch_size=None,
         print_every=100
     ):
         """
         Train the PINN by minimizing the physics-informed loss.
 
         At each epoch new interior and boundary collocation points are sampled.
-        The training does not use FOM snapshots: it only uses the PDE residual,
-        the no-slip boundary condition, the divergence-free constraint and the
-        pressure anchor.
+        Optionally, a supervised FOM snapshot loss can be added through
+        data_points and data_values.
         """
         model = model.to(self.device)
         optimizer = torch.optim.Adam(
@@ -671,14 +716,25 @@ class PINN_Methods(object):
             lr=learning_rate,
             weight_decay=weight_decay
         )
-
         history = {
             "total_loss": [],
             "loss_pde": [],
             "loss_divergence": [],
             "loss_boundary": [],
-            "loss_pressure_anchor": []
+            "loss_pressure_anchor": [],
+            "loss_data": []
         }
+
+        if data_points is not None:
+            data_points = data_points.to(self.device)
+        if data_values is not None:
+            data_values = data_values.to(self.device)
+
+        n_data = None
+        if data_points is not None and data_values is not None:
+            n_data = data_points.shape[0]
+            if data_batch_size is None or data_batch_size > n_data:
+                data_batch_size = n_data
 
         model.train()
 
@@ -686,16 +742,27 @@ class PINN_Methods(object):
             interior_points = self.sample_interior_points(n_interior)
             boundary_points = self.sample_boundary_points(n_boundary)
 
+            if n_data is not None:
+                data_indices = torch.randperm(n_data, device=self.device)[:data_batch_size]
+                data_points_batch = data_points[data_indices]
+                data_values_batch = data_values[data_indices]
+            else:
+                data_points_batch = None
+                data_values_batch = None
+
             optimizer.zero_grad()
 
             total_loss, loss_terms = self.compute_loss(
                 model=model,
                 interior_points=interior_points,
                 boundary_points=boundary_points,
+                data_points=data_points_batch,
+                data_values=data_values_batch,
                 lambda_pde=lambda_pde,
                 lambda_divergence=lambda_divergence,
                 lambda_boundary=lambda_boundary,
-                lambda_pressure_anchor=lambda_pressure_anchor
+                lambda_pressure_anchor=lambda_pressure_anchor,
+                lambda_data=lambda_data
             )
 
             total_loss.backward()
@@ -706,6 +773,7 @@ class PINN_Methods(object):
             history["loss_divergence"].append(loss_terms["loss_divergence"].item())
             history["loss_boundary"].append(loss_terms["loss_boundary"].item())
             history["loss_pressure_anchor"].append(loss_terms["loss_pressure_anchor"].item())
+            history["loss_data"].append(loss_terms["loss_data"].item())
 
             if print_every is not None and (epoch == 1 or epoch % print_every == 0 or epoch == n_epochs):
                 print(
@@ -714,7 +782,8 @@ class PINN_Methods(object):
                     f"pde={loss_terms['loss_pde'].item():.3e} | "
                     f"div={loss_terms['loss_divergence'].item():.3e} | "
                     f"bc={loss_terms['loss_boundary'].item():.3e} | "
-                    f"p0={loss_terms['loss_pressure_anchor'].item():.3e}"
+                    f"p0={loss_terms['loss_pressure_anchor'].item():.3e} | "
+                    f"data={loss_terms['loss_data'].item():.3e}"
                 )
 
         return model, history
@@ -764,3 +833,101 @@ class PINN_Methods(object):
         print(f"[PINN] model loaded from: {export_path}")
 
         return model_data
+
+    def tune_lambdas(
+        self,
+        lambda_configs,
+        network_kwargs=None,
+        train_kwargs=None,
+        data_points=None,
+        data_values=None,
+        data_batch_size=None,
+        selection_metric="total_loss"
+    ):
+        """
+        Tune the PINN loss weights by training one model for each lambda configuration.
+
+        Each element of lambda_configs must be a dictionary containing any subset of:
+            lambda_pde,
+            lambda_divergence,
+            lambda_boundary,
+            lambda_pressure_anchor,
+            lambda_data.
+
+        The best model is selected according to the final value of selection_metric
+        in the training history.
+        """
+        if network_kwargs is None:
+            network_kwargs = {}
+
+        if train_kwargs is None:
+            train_kwargs = {}
+
+        tuning_results = []
+        best_score = None
+        best_model = None
+        best_history = None
+        best_config = None
+
+        for config_id, lambda_config in enumerate(lambda_configs):
+            print("\n" + "=" * 100)
+            print(f"[PINN tuning] configuration {config_id + 1}/{len(lambda_configs)}")
+            print(f"[PINN tuning] lambdas={lambda_config}")
+            print("=" * 100)
+
+            model = self.build_network(**network_kwargs)
+
+            model, history = self.train(
+                model=model,
+                lambda_pde=lambda_config.get("lambda_pde", 1.0),
+                lambda_divergence=lambda_config.get("lambda_divergence", 1.0),
+                lambda_boundary=lambda_config.get("lambda_boundary", 10.0),
+                lambda_pressure_anchor=lambda_config.get("lambda_pressure_anchor", 1.0),
+                lambda_data=lambda_config.get("lambda_data", 0.0),
+                data_points=data_points,
+                data_values=data_values,
+                data_batch_size=data_batch_size,
+                **train_kwargs
+            )
+
+            if selection_metric not in history:
+                raise ValueError(
+                    f"Unknown selection_metric='{selection_metric}'. Available metrics: {list(history.keys())}"
+                )
+
+            score = history[selection_metric][-1]
+
+            result = {
+                "config_id": config_id,
+                "lambda_config": lambda_config,
+                "score": score,
+                "final_total_loss": history["total_loss"][-1],
+                "final_loss_pde": history["loss_pde"][-1],
+                "final_loss_divergence": history["loss_divergence"][-1],
+                "final_loss_boundary": history["loss_boundary"][-1],
+                "final_loss_pressure_anchor": history["loss_pressure_anchor"][-1],
+                "final_loss_data": history["loss_data"][-1]
+            }
+            tuning_results.append(result)
+
+            print(
+                f"[PINN tuning] score({selection_metric})={score:.3e} | "
+                f"pde={result['final_loss_pde']:.3e} | "
+                f"div={result['final_loss_divergence']:.3e} | "
+                f"bc={result['final_loss_boundary']:.3e} | "
+                f"p0={result['final_loss_pressure_anchor']:.3e} | "
+                f"data={result['final_loss_data']:.3e}"
+            )
+
+            if best_score is None or score < best_score:
+                best_score = score
+                best_model = model
+                best_history = history
+                best_config = lambda_config
+
+        print("\n" + "=" * 100)
+        print(f"[PINN tuning] best_config={best_config}")
+        print(f"[PINN tuning] best_score={best_score:.3e}")
+        print("=" * 100)
+
+        return best_model, best_history, best_config, tuning_results
