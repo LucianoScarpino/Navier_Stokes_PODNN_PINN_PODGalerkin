@@ -14,9 +14,9 @@ Find the velocity field \(u\) and the pressure \(p\) such that:
 
 $$
 \begin{cases}
--\mu_0 \Delta u + (u \cdot \nabla)u + \nabla p = f(x,y;\mu_1) & \text{in } \Omega,\
-\nabla \cdot u = 0 & \text{in } \Omega,\
-u = 0 & \text{on } \partial \Omega,\
+-\mu_0 \Delta u + (u \cdot \nabla)u + \nabla p = f(x,y;\mu_1) & \text{in } \Omega,\\
+\nabla \cdot u = 0 & \text{in } \Omega,\\
+u = 0 & \text{on } \partial \Omega,\\
 p(0,0)=0.
 \end{cases}
 $$
