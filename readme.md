@@ -23,6 +23,20 @@ $$
 
 with homogeneous Dirichlet boundary conditions for the velocity and a pressure constraint used to fix the additive constant.
 
+Example FOM visualizations are shown below. The left figure reports the velocity magnitude, while the right figure reports the pressure field.
+
+| Velocity magnitude | Pressure |
+|---|---|
+| ![FOM velocity magnitude](Plots/FOM/u_mag_FOM.png) | ![FOM pressure](Plots/FOM/p_FOM.png) |
+
+The corresponding numerical solutions are also exported in `.vtu` format and can be opened with external visualization software such as ParaView. For the FOM case, the exported files are stored in:
+
+```text
+Export/Solution/FOM/u_x_FOM.vtu
+Export/Solution/FOM/u_y_FOM.vtu
+Export/Solution/FOM/p_FOM.vtu
+```
+
 The comparison includes:
 
 - **FOM**: full-order finite element model used as reference solution;
@@ -328,6 +342,8 @@ Plots and exported solutions are stored in:
 Plots/
 Export/Solution/
 ```
+
+The `.png` files are intended for quick inspection and README visualization. The `.vtu` files contain the exported numerical fields and can be loaded in external visualization tools, for example ParaView, for interactive post-processing.
 
 ---
 
