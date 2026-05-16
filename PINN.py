@@ -31,9 +31,19 @@ class ParametricPINNNetwork(nn.Module):
         width=128,
         latent_dim=64,
         n_residual_blocks=4,
-        activation=nn.Tanh
+        activation=nn.SiLU,
+        mu0_range=(1.0, 10.0),
+        mu1_range=(1.0, 3.0),
+        hard_velocity_boundary=True
     ):
         super().__init__()
+
+        self.hard_velocity_boundary = hard_velocity_boundary
+
+        self.register_buffer("mu0_min", torch.tensor(float(mu0_range[0]), dtype=torch.float32))
+        self.register_buffer("mu0_max", torch.tensor(float(mu0_range[1]), dtype=torch.float32))
+        self.register_buffer("mu1_min", torch.tensor(float(mu1_range[0]), dtype=torch.float32))
+        self.register_buffer("mu1_max", torch.tensor(float(mu1_range[1]), dtype=torch.float32))
 
         self.encoder = nn.Sequential(
             nn.Linear(input_dim, width),
@@ -57,12 +67,45 @@ class ParametricPINNNetwork(nn.Module):
             nn.Linear(width, output_dim)
         )
 
+    def normalize_input(self, input_points):
+        x = input_points[:, 0:1]
+        y = input_points[:, 1:2]
+        mu0 = input_points[:, 2:3]
+        mu1 = input_points[:, 3:4]
+
+        x_normalized = 2.0 * x - 1.0
+        y_normalized = 2.0 * y - 1.0
+        mu0_normalized = 2.0 * (mu0 - self.mu0_min) / (self.mu0_max - self.mu0_min) - 1.0
+        mu1_normalized = 2.0 * (mu1 - self.mu1_min) / (self.mu1_max - self.mu1_min) - 1.0
+
+        return torch.cat(
+            [x_normalized, y_normalized, mu0_normalized, mu1_normalized],
+            dim=1
+        )
+
     def forward(self, input_points):
-        latent = self.encoder(input_points)
+        normalized_points = self.normalize_input(input_points)
+
+        latent = self.encoder(normalized_points)
         features = self.latent_lift(latent)
         features = self.residual_core(features)
-        output = self.decoder(features)
-        return output
+        raw_output = self.decoder(features)
+
+        raw_u_x = raw_output[:, 0:1]
+        raw_u_y = raw_output[:, 1:2]
+        pressure = raw_output[:, 2:3]
+
+        if self.hard_velocity_boundary:
+            x = input_points[:, 0:1]
+            y = input_points[:, 1:2]
+            boundary_factor = x * (1.0 - x) * y * (1.0 - y)
+            u_x = boundary_factor * raw_u_x
+            u_y = boundary_factor * raw_u_y
+        else:
+            u_x = raw_u_x
+            u_y = raw_u_y
+
+        return torch.cat([u_x, u_y, pressure], dim=1)
 
 
 class PINN_Methods(object):
@@ -327,7 +370,8 @@ class PINN_Methods(object):
         width=128,
         latent_dim=64,
         n_residual_blocks=4,
-        activation=nn.Tanh
+        activation=nn.SiLU,
+        hard_velocity_boundary=True
     ):
         """
         Build the neural architecture used by the PINN.
@@ -338,12 +382,12 @@ class PINN_Methods(object):
         Output:
             (u_x, u_y, p)
 
-        The architecture is an encoder-core-decoder FNN:
-            input -> latent representation -> residual feature core -> physical output.
+        The architecture is an encoder-core-decoder residual FNN:
+            normalized input -> latent representation -> residual feature core -> physical output.
 
-        This is not an autoencoder in the classical unsupervised sense, because the
-        input is not reconstructed. However, it uses an encoder/latent/decoder structure
-        to learn a compact internal representation of the parametric solution map.
+        Inputs are internally normalized to [-1, 1]. If hard_velocity_boundary=True,
+        the velocity output is multiplied by x(1-x)y(1-y), so the no-slip condition
+        u = 0 on the boundary is imposed by construction.
         """
         model = ParametricPINNNetwork(
             input_dim=4,
@@ -351,7 +395,10 @@ class PINN_Methods(object):
             width=width,
             latent_dim=latent_dim,
             n_residual_blocks=n_residual_blocks,
-            activation=activation
+            activation=activation,
+            mu0_range=self.mu0_range,
+            mu1_range=self.mu1_range,
+            hard_velocity_boundary=hard_velocity_boundary
         ).to(self.device)
 
         return model

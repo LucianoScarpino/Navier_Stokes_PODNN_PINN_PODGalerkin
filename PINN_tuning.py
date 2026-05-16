@@ -45,8 +45,23 @@ pinn = PINN_Methods(
 # =============================================================================
 
 lambda_configs = [
+    # Baseline configurations.
     {
         "lambda_pde": 1.0,
+        "lambda_divergence": 1.0,
+        "lambda_boundary": 1.0,
+        "lambda_pressure_anchor": 0.1
+    },
+    {
+        "lambda_pde": 1.0,
+        "lambda_divergence": 1.0,
+        "lambda_boundary": 0.1,
+        "lambda_pressure_anchor": 0.1
+    },
+
+    # PDE-focused configurations.
+    {
+        "lambda_pde": 2.0,
         "lambda_divergence": 1.0,
         "lambda_boundary": 1.0,
         "lambda_pressure_anchor": 0.1
@@ -64,8 +79,60 @@ lambda_configs = [
         "lambda_pressure_anchor": 0.1
     },
     {
+        "lambda_pde": 20.0,
+        "lambda_divergence": 1.0,
+        "lambda_boundary": 1.0,
+        "lambda_pressure_anchor": 0.1
+    },
+    {
+        "lambda_pde": 50.0,
+        "lambda_divergence": 1.0,
+        "lambda_boundary": 1.0,
+        "lambda_pressure_anchor": 0.1
+    },
+
+    # Divergence-focused configurations.
+    {
+        "lambda_pde": 1.0,
+        "lambda_divergence": 2.0,
+        "lambda_boundary": 1.0,
+        "lambda_pressure_anchor": 0.1
+    },
+    {
+        "lambda_pde": 1.0,
+        "lambda_divergence": 5.0,
+        "lambda_boundary": 1.0,
+        "lambda_pressure_anchor": 0.1
+    },
+    {
         "lambda_pde": 1.0,
         "lambda_divergence": 10.0,
+        "lambda_boundary": 1.0,
+        "lambda_pressure_anchor": 0.1
+    },
+    {
+        "lambda_pde": 1.0,
+        "lambda_divergence": 20.0,
+        "lambda_boundary": 1.0,
+        "lambda_pressure_anchor": 0.1
+    },
+
+    # Joint PDE-divergence configurations.
+    {
+        "lambda_pde": 2.0,
+        "lambda_divergence": 2.0,
+        "lambda_boundary": 1.0,
+        "lambda_pressure_anchor": 0.1
+    },
+    {
+        "lambda_pde": 5.0,
+        "lambda_divergence": 2.0,
+        "lambda_boundary": 1.0,
+        "lambda_pressure_anchor": 0.1
+    },
+    {
+        "lambda_pde": 5.0,
+        "lambda_divergence": 5.0,
         "lambda_boundary": 1.0,
         "lambda_pressure_anchor": 0.1
     },
@@ -74,6 +141,71 @@ lambda_configs = [
         "lambda_divergence": 10.0,
         "lambda_boundary": 1.0,
         "lambda_pressure_anchor": 0.1
+    },
+    {
+        "lambda_pde": 10.0,
+        "lambda_divergence": 2.0,
+        "lambda_boundary": 1.0,
+        "lambda_pressure_anchor": 0.1
+    },
+    {
+        "lambda_pde": 10.0,
+        "lambda_divergence": 5.0,
+        "lambda_boundary": 1.0,
+        "lambda_pressure_anchor": 0.1
+    },
+    {
+        "lambda_pde": 10.0,
+        "lambda_divergence": 10.0,
+        "lambda_boundary": 1.0,
+        "lambda_pressure_anchor": 0.1
+    },
+    {
+        "lambda_pde": 20.0,
+        "lambda_divergence": 5.0,
+        "lambda_boundary": 1.0,
+        "lambda_pressure_anchor": 0.1
+    },
+
+    # Boundary weight checks. Since velocity can be approximately easy to fit on the boundary,
+    # these configurations test whether reducing boundary emphasis helps the PDE residual.
+    {
+        "lambda_pde": 5.0,
+        "lambda_divergence": 5.0,
+        "lambda_boundary": 0.1,
+        "lambda_pressure_anchor": 0.1
+    },
+    {
+        "lambda_pde": 10.0,
+        "lambda_divergence": 5.0,
+        "lambda_boundary": 0.1,
+        "lambda_pressure_anchor": 0.1
+    },
+    {
+        "lambda_pde": 10.0,
+        "lambda_divergence": 10.0,
+        "lambda_boundary": 0.1,
+        "lambda_pressure_anchor": 0.1
+    },
+
+    # Pressure-anchor checks.
+    {
+        "lambda_pde": 5.0,
+        "lambda_divergence": 5.0,
+        "lambda_boundary": 1.0,
+        "lambda_pressure_anchor": 1.0
+    },
+    {
+        "lambda_pde": 10.0,
+        "lambda_divergence": 5.0,
+        "lambda_boundary": 1.0,
+        "lambda_pressure_anchor": 1.0
+    },
+    {
+        "lambda_pde": 10.0,
+        "lambda_divergence": 10.0,
+        "lambda_boundary": 1.0,
+        "lambda_pressure_anchor": 1.0
     }
 ]
 
@@ -97,7 +229,7 @@ best_model, best_history, best_lambda_config, tuning_results = pinn.tune_lambdas
         "weight_decay": 1.0e-8,
         "print_every": 500
     },
-    selection_metric="total_loss"
+    selection_metric="loss_pde"
 )
 
 
