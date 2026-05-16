@@ -60,15 +60,60 @@ Plots/                      # Saved plots of reconstructed solutions
 
 ---
 
+
 ## Running the offline comparison
 
-Activate the conda environment:
+Create and activate a Python environment of your choice, then install the standard dependencies:
 
 ```bash
-conda activate mor_env
+pip install -r requirements.txt
 ```
 
-Run the main script:
+Alternatively, using conda:
+
+```bash
+conda install --file requirements.txt
+```
+
+The custom `pypolydim` package must be installed separately, as explained in the next section. After the dependencies are installed, run:
+
+```bash
+python main.py
+```
+
+---
+
+## Installing `pypolydim`
+
+The finite element backend relies on the external `pypolydim` package. This package is not installed from PyPI in the usual way. It must be downloaded from the official distribution page in the version matching:
+
+- the Python version used in the environment, for example Python 3.11;
+- the operating system;
+- the machine architecture, for example macOS ARM64 or x86_64.
+
+For example, on a macOS ARM64 machine with Python 3.11, the downloaded wheel may have a name similar to:
+
+```text
+pypolydim-2.0.12-cp311-cp311-macosx_11_0_arm64.whl
+```
+
+After downloading the correct `.whl` file, place it in the `Software/` folder or in another known local folder. Then install it inside the active Python environment with:
+
+```bash
+python -m pip install ./pypolydim-2.0.12-cp311-cp311-macosx_11_0_arm64.whl
+```
+
+Replace the wheel filename with the one matching your system.
+
+To verify the installation, run:
+
+```bash
+python -c "from pypolydim import polydim, gedim; print('pypolydim installed correctly')"
+```
+
+If the command prints the confirmation message without errors, the package is correctly installed.
+
+After installing `pypolydim`, the main comparison can be launched with:
 
 ```bash
 python main.py
@@ -108,7 +153,9 @@ Use `all` to run the complete comparison. Use a single method to reduce executio
 
 ## External-library note
 
-The code depends on the custom `pypolydim` library. During execution, the Python process may occasionally abort without a standard Python traceback, for example:
+The code depends on `pypolydim`, which provides the FEM-related utilities used by the FOM and by the FEM-style plotting/export routines. Since this is an external compiled package, the wheel must match the local Python version and machine architecture.
+
+During execution, the Python process may occasionally abort without a standard Python traceback, for example:
 
 ```text
 zsh: abort      python main.py
@@ -265,9 +312,12 @@ Export/Solution/
 ## Typical workflow
 
 ```bash
-conda activate mor_env
+pip install -r requirements.txt
+python -m pip install ./pypolydim-2.0.12-cp311-cp311-macosx_11_0_arm64.whl
 python main.py
 ```
+
+The wheel filename is only an example. It must be replaced with the correct `pypolydim` wheel for the active Python version and local machine architecture.
 
 After `main.py` completes successfully:
 
