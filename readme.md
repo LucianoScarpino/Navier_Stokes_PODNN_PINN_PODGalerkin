@@ -23,7 +23,7 @@ $$
 
 with homogeneous Dirichlet boundary conditions for the velocity and a pressure constraint used to fix the additive constant.
 
-Example FOM visualizations are shown below. The left figure reports the velocity magnitude, while the right figure reports the pressure field.
+The example below shows the numerical solution generated with the finite element method (FEM) as FOM. The left figure reports the velocity magnitude, while the right figure reports the pressure field.
 
 | Velocity magnitude | Pressure |
 |---|---|
