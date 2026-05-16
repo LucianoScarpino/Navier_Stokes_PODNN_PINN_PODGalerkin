@@ -4,7 +4,7 @@ This repository contains a comparative study of reduced and surrogate modelling 
 
 The reference problem is:
 
-$\mu_0 \Delta u + (u \cdot \nabla)u + \nabla p = f(x,y;\mu_1)$,
+$\mu_0 \Delta u + (u \cdot \nabla)u + \nabla p = f(x,y;\mu_1)$,\
 $\nabla \cdot u = 0$,
 
 with homogeneous Dirichlet boundary conditions for the velocity and a pressure constraint used to fix the additive constant.
