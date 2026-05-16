@@ -1,5 +1,3 @@
-
-
 import numpy as np
 
 from PINN import PINN_Methods

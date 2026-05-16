@@ -13,12 +13,26 @@ from other_utilities import make_np_sparse,plot_FOM_solution
 
 class ROM_Methods(object):
     def __init__(self,fom_sol,operators,fom_data,training_set):
+        """
+        Initialize the ROM utility class.
+
+        The object stores the FOM solution, assembled FOM operators, FEM/FOM
+        metadata and the parameter training set used to build snapshots and
+        reduced operators.
+        """
         self.training_set = training_set
         self.operators = operators
         self.fom_sol = fom_sol
         self.fom_data = fom_data
 
     def save_reduced_model(self, reduced_data, export_path, metadata=None):
+        """
+        Save the POD-Galerkin reduced model to disk.
+
+        The saved object contains the reduced operators, basis functions,
+        precomputed tensors and optional metadata needed to run the online
+        POD-Galerkin phase without rebuilding the full offline pipeline.
+        """
         reduced_model = {
             "reduced_data": reduced_data,
             "metadata": metadata if metadata is not None else {}
@@ -31,6 +45,12 @@ class ROM_Methods(object):
 
     @staticmethod
     def load_reduced_model(export_path):
+        """
+        Load a previously saved POD-Galerkin reduced model.
+
+        The method checks that the file exists and is not empty before loading
+        the serialized reduced model dictionary from disk.
+        """
 
         if not os.path.exists(export_path):
             raise FileNotFoundError(
@@ -178,6 +198,14 @@ class ROM_Methods(object):
                 tol=1e-6,
                 N_max=20
                 ):
+        """
+        Execute the offline POD-Galerkin reduction pipeline.
+
+        The method builds velocity, pressure and supremizer snapshots, performs
+        POD truncation, assembles the global reduced basis, projects the linear
+        FOM operators, precomputes the nonlinear convective tensors and trains a
+        reduced RHS surrogate for the online phase.
+        """
         
         A_op = self.operators['A_operator']
         B_x_op = self.operators["B_x_operator"]
@@ -382,6 +410,13 @@ class ROM_Methods(object):
         }
 
     def evaluate_reduced_rhs_nn(self, mu1, reduced_data):
+        """
+        Evaluate the neural surrogate for the reduced right-hand side.
+
+        Given the parameter `mu1`, the method uses the stored shallow neural
+        model to approximate the reduced forcing vector without assembling the
+        full FEM right-hand side during the online phase.
+        """
         rhs_nn = reduced_data["rhs_nn"]
 
         x = np.array([[(mu1 - rhs_nn["x_mean"]) / rhs_nn["x_std"]]])
@@ -391,6 +426,13 @@ class ROM_Methods(object):
         return (H_aug @ rhs_nn["W_out"]).ravel()
 
     def assemble_reduced_rhs_from_fem(self, mu1, V):
+        """
+        Assemble and project the FEM source term for a given `mu1`.
+
+        This method is used offline to generate training targets for the reduced
+        RHS neural surrogate by assembling the full source term and projecting it
+        onto the reduced basis.
+        """
         f_x_function, f_y_function = self.fom_data["assembler"].build_f_components(mu1)
 
         f_x = polydim.pde_tools.assembler_utilities.pcc_2_d.assemble_source_term(
@@ -432,6 +474,14 @@ class ROM_Methods(object):
                                 tol=1e-6,
                                 N_max=20
                                 ):
+        """
+        Generate FOM snapshots and POD correlation matrices.
+
+        For every training parameter, the FOM is solved and the resulting global
+        solution is split into velocity and pressure snapshots. Supremizer
+        snapshots are also computed to enrich the reduced velocity space for the
+        saddle-point structure of the Navier-Stokes problem.
+        """
         
         snapshot_matrix_u = []
         snapshot_matrix_s = []
@@ -487,6 +537,13 @@ class ROM_Methods(object):
                                       B_y_op,
                                       speed_n_dofs,
                                       pressure_n_dofs):
+        """
+        Assemble the inner-product and divergence matrices used for supremizers.
+
+        The method builds the velocity inner-product matrix and the pressure-to-
+        velocity divergence coupling matrices needed to compute supremizer
+        snapshots for pressure stability in the reduced problem.
+        """
         
         X_1 = make_np_sparse(A_op.operator_dofs, [2 * speed_n_dofs, 2 * speed_n_dofs], [0, 0])
         X_2 = make_np_sparse(A_op.operator_dofs, [2 * speed_n_dofs, 2 * speed_n_dofs], [speed_n_dofs, speed_n_dofs])
@@ -496,12 +553,31 @@ class ROM_Methods(object):
         return X_1 + X_2, B_1, B_2
     
     def assemble_reduced_matrix(self, basis, fom_matrix):
+        """
+        Project a FOM matrix onto the reduced basis.
+
+        The returned matrix is `basis.T @ fom_matrix @ basis` and is used in the
+        reduced Galerkin system.
+        """
         return basis.T @ fom_matrix @ basis
 
     def assemble_reduced_vector(self, basis, fom_vector):
+        """
+        Project a FOM vector onto the reduced basis.
+
+        The returned vector is `basis.T @ fom_vector` and represents the reduced
+        coordinates of a full-order vector or residual contribution.
+        """
         return basis.T @ fom_vector
     
     def eig_analysis(self, C, N_max=None, tol=1e-9):
+        """
+        Perform POD eigenvalue analysis on a snapshot correlation matrix.
+
+        The method sorts eigenvalues in descending order, computes the retained
+        energy and selects the number of modes according to the tolerance and the
+        optional maximum dimension.
+        """
         eigenvalues, eigenvectors_matrix = np.linalg.eigh(C)
 
         order = np.argsort(eigenvalues)[::-1]
@@ -526,6 +602,13 @@ class ROM_Methods(object):
         return N, eigenvectors
     
     def create_basis_functions_matrix(self, N, snapshot_matrix, eigenvectors, inner_product=None):
+        """
+        Build normalized POD basis functions from snapshots and eigenvectors.
+
+        Each basis vector is obtained as a linear combination of snapshots and is
+        normalized either with the Euclidean norm or with the supplied inner
+        product matrix.
+        """
         basis_functions = []
         
         for n in range(N):
@@ -547,11 +630,25 @@ class ROM_Methods(object):
 
 class ROM_NN_Methods(object):
     def __init__(self, reduced_data, training_set, fom_data):
+        """
+        Initialize the PODNN utility class.
+
+        The object stores the reduced basis and snapshot data, the parameter
+        training set and the optional FOM/FEM metadata needed for plotting during
+        the offline workflow.
+        """
         self.reduced_data = reduced_data
         self.training_set = np.asarray(training_set)
         self.fom_data = fom_data
 
     def solve_PODNN(self, mu0, mu1, podnn_data, plot_solution=False):
+        """
+        Evaluate the PODNN surrogate for a new parameter value.
+
+        The method predicts the POD coefficients with the trained neural network,
+        reconstructs the full solution through the reduced basis and optionally
+        exports/plots the reconstructed solution when FOM data are available.
+        """
         V = self.reduced_data["V"]
         coefficients = self.predict_coefficients(mu0, mu1, podnn_data)
         U_N = V @ coefficients
@@ -568,6 +665,12 @@ class ROM_NN_Methods(object):
         }
 
     def build_global_snapshot_matrix(self):
+        """
+        Build the global snapshot matrix used for PODNN training.
+
+        The method concatenates velocity and pressure snapshot matrices so that
+        each row corresponds to a full-order solution snapshot.
+        """
         snapshot_matrix_u = self.reduced_data["snapshot_matrix_u"]
         snapshot_matrix_p = self.reduced_data["snapshot_matrix_p"]
 
@@ -579,6 +682,13 @@ class ROM_NN_Methods(object):
         return snapshot_matrix
 
     def compute_pod_coefficients(self):
+        """
+        Compute POD coefficients associated with the FOM snapshots.
+
+        The method solves a least-squares projection problem to express each full
+        snapshot in the POD reduced basis. These coefficients are the supervised
+        targets used to train the PODNN model.
+        """
         V = self.reduced_data["V"]
         snapshot_matrix = self.build_global_snapshot_matrix()
 
@@ -587,6 +697,12 @@ class ROM_NN_Methods(object):
         return coefficients_matrix
 
     def build_mlp(self, input_dim, output_dim, hidden_layers):
+        """
+        Build the multilayer perceptron used by PODNN.
+
+        The network maps normalized parameters to normalized POD coefficients
+        using fully connected layers with Tanh activations.
+        """
         layers = []
         previous_dim = input_dim
 
@@ -710,6 +826,13 @@ class ROM_NN_Methods(object):
         return podnn_data
 
     def predict_coefficients(self, mu0, mu1, podnn_data):
+        """
+        Predict POD coefficients for a new parameter value.
+
+        The trained neural network is rebuilt from the saved metadata, the input
+        parameter is normalized, and the predicted coefficients are transformed
+        back to their physical scale.
+        """
         model = self.build_mlp(
             podnn_data["input_dim"],
             podnn_data["output_dim"],
@@ -779,6 +902,13 @@ class ROM_NN_Methods(object):
         )
 
     def save_podnn_model(self, podnn_data, export_path, metadata=None):
+        """
+        Save the trained PODNN model to disk.
+
+        The saved dictionary contains the neural-network weights, normalization
+        data, reduced basis information and optional metadata needed for online
+        PODNN evaluation.
+        """
         podnn_model = {
             "podnn_data": podnn_data,
             "reduced_data": self.reduced_data,
@@ -792,6 +922,12 @@ class ROM_NN_Methods(object):
 
     @staticmethod
     def load_podnn_model(export_path):
+        """
+        Load a previously saved PODNN model.
+
+        The method checks that the file exists and is not empty before loading
+        the serialized PODNN data and reduced model information.
+        """
         if not os.path.exists(export_path):
             raise FileNotFoundError(
                 f"PODNN model file not found: {export_path}. Run the offline script first."
@@ -829,6 +965,13 @@ class ROMPerformanceEvaluator(object):
         method_name="POD-Galerkin",
         results_prefix="fom_vs_pod_galerkin"
     ):
+        """
+        Initialize the performance evaluator for FOM-vs-surrogate comparisons.
+
+        The evaluator stores the FOM solver, reduced/surrogate model, boundary
+        information, parameter ranges and output naming options used to compute
+        errors, timings, speedups and CSV reports.
+        """
         self.solver = solver
         self.rom = rom
         self.reduced_data = reduced_data
@@ -843,6 +986,12 @@ class ROMPerformanceEvaluator(object):
         self.results_prefix = results_prefix
 
     def solve_reduced_model(self, mu0, mu1):
+        """
+        Solve or evaluate the selected reduced/surrogate model.
+
+        If a custom `reduced_solver` callback is provided, it is used directly.
+        Otherwise, the default POD-Galerkin solver is called.
+        """
         if self.reduced_solver is not None:
             return self.reduced_solver(mu0, mu1)
 
@@ -855,16 +1004,34 @@ class ROMPerformanceEvaluator(object):
         )
 
     def relative_error(self, reference, approximation):
+        """
+        Compute the relative Euclidean error between two vectors.
+
+        A small lower bound is used in the denominator to avoid division by zero
+        when the reference vector norm is extremely small.
+        """
         denominator = max(np.linalg.norm(reference), 1.0e-14)
         return np.linalg.norm(reference - approximation) / denominator
 
     def split_global_solution(self, global_solution, speed_n_dofs):
+        """
+        Split a global solution vector into velocity and pressure components.
+
+        The global ordering is assumed to be `[u_x, u_y, p]`, with `u_x` and
+        `u_y` containing `speed_n_dofs` entries each.
+        """
         u_x = global_solution[0:speed_n_dofs]
         u_y = global_solution[speed_n_dofs:2 * speed_n_dofs]
         p = global_solution[2 * speed_n_dofs:]
         return u_x, u_y, p
 
     def compute_errors(self, fom_solution, rom_solution):
+        """
+        Compute component-wise relative errors between FOM and surrogate outputs.
+
+        The method evaluates errors on the global solution, velocity components,
+        velocity magnitude and pressure.
+        """
         speed_n_dofs = self.reduced_data["speed_n_dofs"]
 
         U_fom = fom_solution["u"]
@@ -885,6 +1052,11 @@ class ROMPerformanceEvaluator(object):
         }
 
     def print_metric_summary(self, metric_name, values):
+        """
+        Print mean, maximum and standard deviation for a metric.
+
+        This helper is used to summarize the testing-set results in the terminal.
+        """
         values = np.asarray(values)
         print(
             f"{metric_name:<18} | "
@@ -894,6 +1066,13 @@ class ROMPerformanceEvaluator(object):
         )
 
     def evaluate(self, n_test=10, seed=123, results_folder="./Results/POD_Galerkin"):
+        """
+        Evaluate FOM and reduced/surrogate models on a random testing set.
+
+        For each sampled parameter value, the method solves the FOM, evaluates
+        the selected reduced/surrogate model, computes errors and timings, prints
+        a summary and writes per-sample and aggregate CSV result files.
+        """
         print("\n" + "=" * 100)
         print(f"[Metrics] FOM vs {self.method_name} on testing set")
         print("=" * 100)

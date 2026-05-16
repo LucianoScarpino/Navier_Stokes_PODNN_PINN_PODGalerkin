@@ -7,6 +7,13 @@ from other_utilities import make_np_sparse,plot_FOM_solution
 
 class Solver(object):
     def __init__(self,discretizer:object,export_path:str):
+        """
+        Initialize the full-order solver.
+
+        The discretizer is used to build the computational mesh, connectivity,
+        geometric data, geometry utilities and VTK utilities. The export path is
+        stored and later used when exporting or plotting FOM solutions.
+        """
         self.method_type,self.mesh,\
             self.mesh_connectivity_data,self.mesh_geometric_data,\
                 self.geometry_utilities,self.vtk_utilities = discretizer.discretize()
@@ -24,6 +31,15 @@ class Solver(object):
         plot_solution: str = False,
         plot_path:str = "./Plots/FOM"
         ):
+        """
+        Solve the full-order Navier-Stokes finite element problem.
+
+        The method builds Taylor-Hood FEM spaces, assembles the linear Stokes
+        contribution and source term, then applies Newton's method to solve the
+        nonlinear convective problem. It returns the converged FOM solution, the
+        assembled operators needed for ROM construction and the FEM metadata used
+        by plotting, post-processing and reduced/surrogate methods.
+        """
         
         pressure_reference_element_data,speed_reference_element_data,\
                     pressure_mesh_dofs_info,pressure_dofs_data,\
@@ -291,13 +307,38 @@ class Solver(object):
 
 
     def speed_x_initial_condition(self,x, y, z):  
+        """
+        Define the initial condition for the x-component of the velocity.
+
+        The current FOM Newton initialization uses a zero velocity field in the
+        x-direction at all spatial points.
+        """
         return 0.0
     def speed_y_initial_condition(self,x, y, z):  
+        """
+        Define the initial condition for the y-component of the velocity.
+
+        The current FOM Newton initialization uses a zero velocity field in the
+        y-direction at all spatial points.
+        """
         return 0.0
     def pressure_initial_condition(self,x, y, z):  
+        """
+        Define the initial condition for the pressure field.
+
+        The current FOM Newton initialization uses a zero pressure field at all
+        pressure degrees of freedom.
+        """
         return 0.0
 
     def set_dofs(self):
+        """
+        Create the boundary-information objects used by the DOF manager.
+
+        The method defines internal, Dirichlet and Neumann/none boundary markers
+        in the format expected by `pypolydim` and returns them for later use in
+        the Taylor-Hood FEM discretization.
+        """
         info_internal = polydim.pde_tools.do_fs.DOFsManager.MeshDOFsInfo.BoundaryInfo(polydim.pde_tools.do_fs.DOFsManager.MeshDOFsInfo.BoundaryInfo.BoundaryTypes.none)
         info_internal.marker = 0
 
@@ -317,6 +358,14 @@ class Solver(object):
             p_boundary_info,
             u_boundary_info
             ):
+        """
+        Build the Taylor-Hood finite element spaces for pressure and velocity.
+
+        The method creates the pressure and velocity reference elements, assigns
+        boundary information to the mesh DOFs, builds the corresponding DOF data
+        structures and returns all FEM quantities required by assembly, Newton
+        iteration and post-processing.
+        """
         
         pressure_reference_element_data = polydim.pde_tools.local_space_pcc_2_d.create_reference_element(method_type, 1)
         speed_reference_element_data = polydim.pde_tools.local_space_pcc_2_d.create_reference_element(method_type,2) 

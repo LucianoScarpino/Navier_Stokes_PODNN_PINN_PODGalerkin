@@ -25,7 +25,6 @@ if not os.path.exists(results_folder):
 best_lambdas_path = file_path + "/Models/pinn_best_lambdas.json"
 tuning_results_path = results_folder + "/pinn_lambda_tuning_results.csv"
 
-
 # =============================================================================
 # Parameter domain and PINN object
 # =============================================================================

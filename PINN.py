@@ -11,6 +11,14 @@ from other_utilities import plot_FOM_solution
 
 class ResidualFNNBlock(nn.Module):
     def __init__(self, width, activation=nn.Tanh):
+        """
+        Initialize a residual fully connected block.
+
+        The block maps a feature vector of dimension `width` into another vector
+        of the same dimension and adds the input through a residual connection.
+        This helps the PINN train deeper feature transformations without changing
+        the feature size.
+        """
         super().__init__()
         self.block = nn.Sequential(
             nn.Linear(width, width),
@@ -20,6 +28,12 @@ class ResidualFNNBlock(nn.Module):
         self.activation = activation()
 
     def forward(self, x):
+        """
+        Apply the residual block to the input features.
+
+        The output is obtained by adding the learned correction to the input and
+        then applying the activation function.
+        """
         return self.activation(x + self.block(x))
 
 
@@ -36,6 +50,16 @@ class ParametricPINNNetwork(nn.Module):
         mu1_range=(1.0, 3.0),
         hard_velocity_boundary=True
     ):
+        """
+        Initialize the parametric PINN neural architecture.
+
+        The network receives points of the form `(x, y, mu0, mu1)` and returns
+        `(u_x, u_y, p)`. Internally, the input is normalized, passed through an
+        encoder, lifted to a residual feature core and decoded into the physical
+        variables. If `hard_velocity_boundary=True`, the velocity output is
+        multiplied by `x(1-x)y(1-y)` so that the no-slip velocity condition is
+        satisfied by construction on the boundary.
+        """
         super().__init__()
 
         self.hard_velocity_boundary = hard_velocity_boundary
@@ -68,6 +92,14 @@ class ParametricPINNNetwork(nn.Module):
         )
 
     def normalize_input(self, input_points):
+        """
+        Normalize the network input variables to approximately the same scale.
+
+        The spatial coordinates `x` and `y` are mapped from `[0, 1]` to `[-1, 1]`.
+        The parameters `mu0` and `mu1` are mapped from their prescribed parameter
+        ranges to `[-1, 1]`. This improves the conditioning of the neural network
+        training because all input channels have comparable numerical scales.
+        """
         x = input_points[:, 0:1]
         y = input_points[:, 1:2]
         mu0 = input_points[:, 2:3]
@@ -84,6 +116,14 @@ class ParametricPINNNetwork(nn.Module):
         )
 
     def forward(self, input_points):
+        """
+        Evaluate the PINN network at the input points.
+
+        The method computes the normalized input, extracts latent features through
+        the encoder and residual core, decodes the raw physical outputs, and then
+        optionally enforces the homogeneous velocity boundary condition through a
+        multiplicative boundary factor.
+        """
         normalized_points = self.normalize_input(input_points)
 
         latent = self.encoder(normalized_points)
@@ -110,6 +150,13 @@ class ParametricPINNNetwork(nn.Module):
 
 class PINN_Methods(object):
     def __init__(self, mu0_range, mu1_range, fom_data, device=None):
+        """
+        Initialize the PINN utility class.
+
+        The class stores the parameter ranges, optional FOM/FEM data used for
+        comparison and plotting, and selects the PyTorch device. If no device is
+        specified, it tries to use Apple MPS first, then CUDA, and finally CPU.
+        """
         self.mu0_range = mu0_range
         self.mu1_range = mu1_range
         self.fom_data = fom_data

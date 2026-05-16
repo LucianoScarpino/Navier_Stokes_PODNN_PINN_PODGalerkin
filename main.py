@@ -1,7 +1,6 @@
-import numpy as np
-
 import json
 import os
+import numpy as np
 
 from pypolydim import polydim, gedim
 from pypolydim.export_vtk_utilities import ExportVTKUtilities
@@ -19,7 +18,7 @@ pinn_model_path = file_path + "/Models/pinn_model.pkl"
 pinn_best_lambdas_path = file_path + "/Models/pinn_best_lambdas.json"
 
 # Available: 'PODGalerkin', 'PODNN', 'PINN', 'all'
-method = 'PINN' 
+method = 'all'  #<--- change method here
 visualize = True
 
 mesh_size = 0.001

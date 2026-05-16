@@ -9,6 +9,13 @@ class Discretize(object):
                  mesh_size:float,
                  domain_area:float,
                  mesh_path:str):
+        """
+        Initialize the discretization object.
+
+        The class stores the domain vertices, target mesh size, domain area and
+        mesh export path. These quantities are later used to generate the PDE
+        domain, create the computational mesh and export the mesh in VTK format.
+        """
         
         self.vertices = vertices
         self.mesh_size = mesh_size
@@ -16,6 +23,14 @@ class Discretize(object):
         self.mesh_path = mesh_path
 
     def discretize(self):
+        """
+        Execute the full mesh-generation workflow.
+
+        The method creates the geometry, mesh and VTK utilities, builds the PDE
+        domain, generates the computational mesh, computes mesh connectivity and
+        geometric data, exports the mesh and returns all discretization objects
+        required by the finite element solver.
+        """
         geometry_utilities, mesh_utilities, vtk_utilities = self.generate_utilies_()
         pde_domain = self.generate_pde_domain_()
         mesh,mesh_geometric_data,method_type = self.generate_mesh_(

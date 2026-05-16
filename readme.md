@@ -37,15 +37,17 @@ The comparison includes:
 ```text
 Software/
 ├── main.py                 # Offline pipeline for model construction, training and comparison
-├── POD_online.py           # Online-only POD-Galerkin evaluation after main.py
+├── PODGalerkin_online.py   # Online-only POD-Galerkin evaluation after main.py
 ├── PODNN_online.py         # Online-only PODNN evaluation after main.py
 ├── PINN_online.py          # Online-only PINN evaluation after main.py
+├── PINN_tuning.py          # Physics-only lambda tuning for the PINN loss terms
 ├── Solver.py               # FOM solver and Newton procedure
 ├── Assembler.py            # Assembly utilities for operators, RHS and strong values
 ├── ROM.py                  # POD-Galerkin, PODNN and metric-evaluation utilities
 ├── PINN.py                 # PINN architecture, training, saving and loading
 ├── Discretization.py       # Mesh and domain discretization utilities
 ├── other_utilities.py      # Export, plotting and helper functions
+├── environment_full.yml    # Conda environment specification
 └── readme.md
 ```
 

@@ -7,6 +7,13 @@ import os
 from pypolydim import polydim
 
 def make_np_sparse(A_sparse_data, new_size = None, shifts = None, transpose = None):
+    """
+    Convert a pypolydim sparse matrix representation into a SciPy sparse array.
+
+    The optional `new_size` argument sets the output matrix shape, `shifts`
+    translates row and column indices, and `transpose=True` swaps the sparse
+    row/column indexing while building the SciPy CSC matrix.
+    """
     if new_size is None:
         new_size = [A_sparse_data.size[0], A_sparse_data.size[1]]
     if shifts is None:
@@ -25,6 +32,13 @@ def make_np_sparse(A_sparse_data, new_size = None, shifts = None, transpose = No
                                       shape=(new_size[0], new_size[1]))
                                
 def plot_mesh(mesh, export_folder = ""):
+    """
+    Plot the computational mesh.
+
+    The mesh cell-0D coordinates are used to build a triangular visualization.
+    If `export_folder` is provided, the plot is saved as `Mesh.png`; otherwise
+    it is only displayed briefly.
+    """
     fig = plt.figure(figsize=plt.figaspect(0.5))
     
     ax1 = fig.add_subplot(1, 1, 1)
@@ -47,6 +61,13 @@ def plot_mesh(mesh, export_folder = ""):
         plt.close(fig)
 
 def evaluate_function_on_points(points, function_name):
+    """
+    Evaluate a scalar function on a set of points.
+
+    The input `points` is expected to store coordinates column-wise. The given
+    callable is evaluated at each point and the resulting values are returned
+    as a NumPy array.
+    """
     num_points = points.shape[1]
     function_values = np.zeros(num_points)
 
@@ -55,9 +76,22 @@ def evaluate_function_on_points(points, function_name):
     return function_values
 
 def plot_solution(mesh, solution_cell0Ds, title = None, export_folder = None):
+    """
+    Plot a scalar solution defined on the mesh cell-0D coordinates.
+
+    This is a convenience wrapper around `plot_solution_on_coordinates`, using
+    the coordinates directly extracted from the mesh.
+    """
     plot_solution_on_coordinates(mesh.cell0_ds_coordinates(), solution_cell0Ds, title, export_folder)
 
 def plot_solution_on_coordinates(coordinates, solution_on_coordinates, title = None, export_folder = None):
+    """
+    Plot a scalar solution on a set of 2D coordinates.
+
+    The function creates both a 2D triangulated color plot and a 3D trisurface
+    plot. If `export_folder` is provided, the figure is saved using the title
+    as filename.
+    """
     if title is None:
         title = "Solution"
     if export_folder is None:
@@ -91,6 +125,12 @@ def plot_solution_on_coordinates(coordinates, solution_on_coordinates, title = N
         plt.show()
 
 def export_folder(file_path):
+    """
+    Create and return the standard export-folder structure.
+
+    The function creates the root export folder, the mesh export folder and the
+    FOM solution export folder if they do not already exist.
+    """
     # Export Folder 
     export_file_path = file_path
     if not os.path.exists(export_file_path):
@@ -122,6 +162,14 @@ def plot_FOM_solution(mesh,
                       plot_path,
                       method
                       ):
+    """
+    Export and plot a FOM-like solution on mesh cell-0D coordinates.
+
+    The function extracts velocity and pressure solutions on cell-0D mesh
+    points using pypolydim utilities, exports VTK files for `u_x`, `u_y` and
+    `p`, and saves plots for `u_x`, `u_y`, velocity magnitude and pressure.
+    The `method` suffix is appended to output filenames and plot titles.
+    """
     
 
     u_x_on_cell0Ds = polydim.pde_tools.assembler_utilities.pcc_2_d.extract_solution_on_cell0_ds(
