@@ -1,5 +1,8 @@
 import numpy as np
 
+import json
+import os
+
 from pypolydim import polydim, gedim
 from pypolydim.export_vtk_utilities import ExportVTKUtilities
 
@@ -13,6 +16,7 @@ file_path, mesh_path, solution_path = export_folder("./Export")
 reduced_model_path = file_path + "/Models/reduced_model.pkl"
 podnn_model_path = file_path + "/Models/podnn_model.pkl"
 pinn_model_path = file_path + "/Models/pinn_model.pkl"
+pinn_best_lambdas_path = file_path + "/Models/pinn_best_lambdas.json"
 
 # Available: 'PODGalerkin', 'PODNN', 'PINN', 'all'
 method = 'PINN' 
@@ -265,6 +269,28 @@ if method == 'PINN' or method == 'all':
         n_residual_blocks=4
     )
 
+    if os.path.exists(pinn_best_lambdas_path):
+        with open(pinn_best_lambdas_path, "r") as file:
+            pinn_lambdas = json.load(file)
+
+        print("=" * 100)
+        print(f"[PINN] Loaded tuned lambdas from: {pinn_best_lambdas_path}")
+        print(f"[PINN] lambdas={pinn_lambdas}")
+        print("=" * 100)
+    else:
+        pinn_lambdas = {
+            "lambda_pde": 1.0,
+            "lambda_divergence": 1.0,
+            "lambda_boundary": 10.0,
+            "lambda_pressure_anchor": 1.0
+        }
+
+        print("=" * 100)
+        print(f"[PINN] Tuned lambda file not found: {pinn_best_lambdas_path}")
+        print("[PINN] Using default lambdas")
+        print(f"[PINN] lambdas={pinn_lambdas}")
+        print("=" * 100)
+
     pinn_model, pinn_history = pinn.train(
         model=pinn_model,
         n_epochs=10000, #<- len(training)
@@ -272,10 +298,10 @@ if method == 'PINN' or method == 'all':
         n_boundary=1024,
         learning_rate=1.0e-3,
         weight_decay=1.0e-8,
-        lambda_pde=1.0,
-        lambda_divergence=1.0,
-        lambda_boundary=10.0,
-        lambda_pressure_anchor=1.0,
+        lambda_pde=pinn_lambdas["lambda_pde"],
+        lambda_divergence=pinn_lambdas["lambda_divergence"],
+        lambda_boundary=pinn_lambdas["lambda_boundary"],
+        lambda_pressure_anchor=pinn_lambdas["lambda_pressure_anchor"],
         print_every=500
     )
 
@@ -324,7 +350,12 @@ if method == 'PINN' or method == 'all':
             "n_residual_blocks": 4,
             "epochs": 10000,
             "learning_rate": 1.0e-3,
-            "weight_decay": 1.0e-8
+            "weight_decay": 1.0e-8,
+            "lambda_pde": pinn_lambdas["lambda_pde"],
+            "lambda_divergence": pinn_lambdas["lambda_divergence"],
+            "lambda_boundary": pinn_lambdas["lambda_boundary"],
+            "lambda_pressure_anchor": pinn_lambdas["lambda_pressure_anchor"],
+            "lambda_source": pinn_best_lambdas_path if os.path.exists(pinn_best_lambdas_path) else "default"
         }
     )
 
