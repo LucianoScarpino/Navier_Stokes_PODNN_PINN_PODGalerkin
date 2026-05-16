@@ -14,7 +14,7 @@ The comparison includes:
 - **FOM**: full-order finite element model used as reference solution;
 - **POD-Galerkin**: intrusive reduced-order model obtained by projecting the FOM operators onto a POD basis;
 - **PODNN**: non-intrusive neural surrogate where a neural network predicts the POD coefficients from the parameters;
-- **PINN**: physics-informed neural network, optionally guided by FOM snapshot data.
+- **PINN**: physics-informed neural network.
 
 ---
 
@@ -76,7 +76,7 @@ If you only want to update an already existing environment, run:
 conda env update -f environment_full.yml --prune
 ```
 
-The custom `pypolydim` package must be installed separately, as explained in the next section. After the dependencies and `pypolydim` are installed, run:
+The custom `pypolydim` package **must be installed separately**, as explained in the next section. After the dependencies and `pypolydim` are installed, run:
 
 ```bash
 python main.py
@@ -84,7 +84,7 @@ python main.py
 
 ---
 
-## Managing dependencies
+## Managing dependencies and Installing `pypolydim`
 
 The file:
 
@@ -92,27 +92,7 @@ The file:
 environment_full.yml
 ```
 
-contains the conda environment specification used to run the code. It is more appropriate than a simple `requirements.txt` here because the workflow relies on scientific Python packages, PyTorch and a local wheel installation for `pypolydim`.
-
-To generate or update the full environment file from the currently active conda environment, use:
-
-```bash
-conda env export > environment_full.yml
-```
-
-This command stores the full package list, including exact versions and channels. It is useful for reproducibility, but it may also include platform-specific dependencies. For a lighter export, one may use:
-
-```bash
-conda env export --from-history > environment.yml
-```
-
-However, `environment_full.yml` is the preferred file for reproducing the current setup as closely as possible.
-
-`pypolydim` is not expected to be installed automatically from the YAML file. It should be installed manually from the correct local wheel after the conda environment has been created.
-
----
-
-## Installing `pypolydim`
+contains the conda environment specification used to run the code. It is more appropriate than a simple `requirements.txt` here because the workflow relies on scientific Python packages, PyTorch and a local wheel installation for `pypolydim`. However, `pypolydim` is not expected to be installed automatically from the YAML file. It should be installed manually from the correct local wheel after the conda environment has been created.
 
 The finite element backend relies on the external `pypolydim` package. This package is not installed from PyPI in the usual way. It must be downloaded from the official distribution page in the version matching:
 
@@ -176,11 +156,12 @@ method = 'PINN'
 method = 'all'
 ```
 
-Use `all` to run the complete comparison. Use a single method to reduce execution time during debugging.
+Use `all` to run the complete comparison. 
+Use a single method to reduce execution time during debugging.
 
 ---
 
-## External-library note
+### External-library note
 
 The code depends on `pypolydim`, which provides the FEM-related utilities used by the FOM and by the FEM-style plotting/export routines. Since this is an external compiled package, the wheel must match the local Python version and machine architecture.
 
