@@ -1,18 +1,11 @@
-
-
 # Comparative Study of Reduced and Surrogate Models for Parametric Navier–Stokes
 
 This repository contains a comparative study of reduced and surrogate modelling strategies for the parametric steady incompressible Navier–Stokes equations. The goal is to compare projection-based model reduction and neural surrogate approaches in terms of accuracy, online computational cost, speedup and practical usability.
 
 The reference problem is:
 
-\[
--\mu_0 \Delta u + (u \cdot \nabla)u + \nabla p = f(x,y;\mu_1),
-\]
-
-\[
-\nabla \cdot u = 0,
-\]
+$\mu_0 \Delta u + (u \cdot \nabla)u + \nabla p = f(x,y;\mu_1)$,
+$\nabla \cdot u = 0$,
 
 with homogeneous Dirichlet boundary conditions for the velocity and a pressure constraint used to fix the additive constant.
 
@@ -63,23 +56,59 @@ Plots/                      # Saved plots of reconstructed solutions
 
 ## Running the offline comparison
 
-Create and activate a Python environment of your choice, then install the standard dependencies:
+Create and activate a Python environment of your choice. The repository uses a conda environment export file:
 
-```bash
-pip install -r requirements.txt
+```text
+environment_full.yml
 ```
 
-Alternatively, using conda:
+To recreate the environment from this file, run:
 
 ```bash
-conda install --file requirements.txt
+conda env create -f environment_full.yml
 ```
 
-The custom `pypolydim` package must be installed separately, as explained in the next section. After the dependencies are installed, run:
+Then activate the environment created from the YAML file. The environment name is the one specified inside `environment_full.yml`.
+
+If you only want to update an already existing environment, run:
+
+```bash
+conda env update -f environment_full.yml --prune
+```
+
+The custom `pypolydim` package must be installed separately, as explained in the next section. After the dependencies and `pypolydim` are installed, run:
 
 ```bash
 python main.py
 ```
+
+---
+
+## Managing dependencies
+
+The file:
+
+```text
+environment_full.yml
+```
+
+contains the conda environment specification used to run the code. It is more appropriate than a simple `requirements.txt` here because the workflow relies on scientific Python packages, PyTorch and a local wheel installation for `pypolydim`.
+
+To generate or update the full environment file from the currently active conda environment, use:
+
+```bash
+conda env export > environment_full.yml
+```
+
+This command stores the full package list, including exact versions and channels. It is useful for reproducibility, but it may also include platform-specific dependencies. For a lighter export, one may use:
+
+```bash
+conda env export --from-history > environment.yml
+```
+
+However, `environment_full.yml` is the preferred file for reproducing the current setup as closely as possible.
+
+`pypolydim` is not expected to be installed automatically from the YAML file. It should be installed manually from the correct local wheel after the conda environment has been created.
 
 ---
 
@@ -123,7 +152,7 @@ python main.py
 
 1. builds the mesh and FEM discretization;
 2. solves an initial FOM problem;
-3. generates a training set of parameter values \((\mu_0,\mu_1)\);
+3. generates a training set of parameter values $(\mu_0,\mu_1)$;
 4. solves the FOM for the training parameters and builds the snapshot matrices;
 5. computes the POD basis;
 6. precomputes the reduced quantities needed by POD-Galerkin;
@@ -226,9 +255,7 @@ Export/Models/podnn_model.pkl
 
 and evaluates the trained neural network to predict the POD coefficients. The reconstructed solution is obtained as:
 
-\[
-U_{PODNN}(\mu) = V a_{NN}(\mu).
-\]
+$U_{PODNN}(\mu) = V a_{NN}(\mu)$.
 
 No FOM solve and no POD recomputation are performed.
 
@@ -244,11 +271,9 @@ This script loads:
 Export/Models/pinn_model.pkl
 ```
 
-and evaluates the trained PINN on a regular grid in \([0,1]^2\). The PINN directly approximates:
+and evaluates the trained PINN on a regular grid in $[0,1]^2$. The PINN directly approximates:
 
-\[
-(x,y,\mu_0,\mu_1) \mapsto (u_x,u_y,p).
-\]
+$(x,y,\mu_0,\mu_1) \mapsto (u_x,u_y,p)$.
 
 Unlike POD-Galerkin and PODNN, the PINN does not use a POD basis.
 
@@ -261,10 +286,10 @@ During the offline comparison, each method is evaluated against the FOM on a tes
 The computed quantities include:
 
 - relative error on the global solution vector;
-- relative error on \(u_x\);
-- relative error on \(u_y\);
-- relative error on velocity magnitude \(|u|\);
-- relative error on pressure \(p\);
+- relative error on $u_x$;
+- relative error on $u_y$;
+- relative error on velocity magnitude $|u|$;
+- relative error on pressure $p$;
 - FOM execution time;
 - reduced/surrogate model execution time;
 - speedup;
@@ -312,28 +337,19 @@ Export/Solution/
 ## Typical workflow
 
 ```bash
-pip install -r requirements.txt
+conda env create -f environment_full.yml
+conda activate <environment_name>
 python -m pip install ./pypolydim-2.0.12-cp311-cp311-macosx_11_0_arm64.whl
 python main.py
 ```
 
-The wheel filename is only an example. It must be replaced with the correct `pypolydim` wheel for the active Python version and local machine architecture.
-
-After `main.py` completes successfully:
-
-```bash
-python POD_online.py
-python PODNN_online.py
-python PINN_online.py
-```
-
-The first command builds the offline data and saves the models. The online scripts then load the saved models and execute only the corresponding online evaluation.
-
+The wheel filename is only an example. It must be replaced with the correct `pypolydim` wheel for the active Python version and local machine architecture. The environment name is specified inside `environment_full.yml`.
 ---
 
 ## Notes
 
 - `main.py` can be computationally expensive because it generates FOM snapshots and evaluates metrics against fresh FOM solves.
+- Dependency reproduction is based on `environment_full.yml`; `pypolydim` must still be installed manually from the appropriate wheel.
 - The online scripts are much lighter and demonstrate the online-use phase after model construction.
 - PINN performance is sensitive to loss weights, training epochs, architecture and the use of supervised FOM snapshot data.
 - If a low-level `zsh: abort` occurs, rerun the command; this is a known practical issue observed with the current library setup.
