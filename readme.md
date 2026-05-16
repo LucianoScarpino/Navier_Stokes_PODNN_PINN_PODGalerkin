@@ -342,8 +342,6 @@ conda activate <environment_name>
 python -m pip install ./pypolydim-2.0.12-cp311-cp311-macosx_11_0_arm64.whl
 python main.py
 ```
-
-The wheel filename is only an example. It must be replaced with the correct `pypolydim` wheel for the active Python version and local machine architecture. The environment name is specified inside `environment_full.yml`.
 ---
 
 ## Notes
