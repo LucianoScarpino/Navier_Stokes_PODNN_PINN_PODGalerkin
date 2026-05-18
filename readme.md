@@ -83,6 +83,7 @@ Plots/                      # Saved plots of reconstructed solutions
 
 ---
 
+**Report:** [Read the full PDF report](./Finite_Element__POD_Galerkin__PODNN_and_PINN_Approaches_for_a_Parametric_Steady_Navier_Stokes_Problem.pdf)
 
 ## Running the offline comparison
 
