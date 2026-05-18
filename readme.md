@@ -29,7 +29,7 @@ The example below shows the numerical solution generated with the finite element
 |---|---|
 | ![FOM velocity magnitude](Plots/FOM/u_mag_FOM.png) | ![FOM pressure](Plots/FOM/p_FOM.png) |
 
-**Report:** [Read the full PDF report](./Finite_Element__POD_Galerkin__PODNN_and_PINN_Approaches_for_a_Parametric_Steady_Navier_Stokes_Problem.pdf?raw=1)
+**Report:** [Read the full PDF report](Finite_Element__POD_Galerkin__PODNN_and_PINN_Approaches_for_a_Parametric_Steady_Navier__Stokes_Problem.pdf)
 
 The corresponding numerical solutions are also exported in `.vtu` format and can be opened with external visualization software such as ParaView. For the FOM case, the exported files are stored in:
 
